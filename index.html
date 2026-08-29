@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发布商品</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: sans-serif; background-color: #17212b; color: #ffffff; padding: 15px; margin: 0; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 5px; font-size: 14px; color: #aaaaaa; }
+        input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #2f3842; background-color: #242f3d; color: #fff; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #248bca; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-top: 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h2>发布商品</h2>
+    <div class="form-group">
+        <label>标题 *</label>
+        <input type="text" id="title" placeholder="例如：iPhone 15 Pro 256G 急出">
+    </div>
+    <div class="form-group">
+        <label>价格 *</label>
+        <input type="text" id="price" placeholder="例如：680 美元">
+    </div>
+    <div class="form-group">
+        <label>联系方式 *</label>
+        <input type="text" id="contact" placeholder="@你的用户名 或 电话">
+    </div>
+    <div class="form-group">
+        <label>详细描述</label>
+        <textarea id="desc" rows="4" placeholder="描述物品成色、交易方式..."></textarea>
+    </div>
+    <button id="submitBtn">提交审核</button>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        document.getElementById('submitBtn').addEventListener('click', function() {
+            const title = document.getElementById('title').value;
+            const price = document.getElementById('price').value;
+            const contact = document.getElementById('contact').value;
+            const desc = document.getElementById('desc').value;
+
+            if (!title || !price || !contact) {
+                alert('请填写完整必填项！');
+                return;
+            }
+
+            const data = { title, price, contact, desc };
+            tg.sendData(JSON.stringify(data));
+            tg.close();
+        });
+    </script>
+</body>
+</html>
