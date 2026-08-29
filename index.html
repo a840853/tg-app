@@ -234,6 +234,19 @@
             el.classList.toggle('active');
         }
 
+        // 从聊天里点击"出售物品"/"求购物品"按钮打开小程序时，会带上 ?type=sell 或 ?type=buy，
+        // 这里根据这个参数自动预选对应的标签，省得用户还要再点一次
+        (function initTypeFromQuery() {
+            const params = new URLSearchParams(window.location.search);
+            const t = params.get('type');
+            const typeBtns = document.querySelectorAll('.type-btn');
+            if (t === 'buy' && typeBtns[1]) {
+                selectType('求购', typeBtns[1]);
+            } else if (t === 'sell' && typeBtns[0]) {
+                selectType('出售', typeBtns[0]);
+            }
+        })();
+
         function triggerImageInput() {
             if (selectedImages.length >= 9) {
                 alert('最多上传 9 张图片');
@@ -575,6 +588,9 @@
                                 [
                                     { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
                                     { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
+                                ],
+                                [
+                                    { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
                                 ]
                             ]
                         }
