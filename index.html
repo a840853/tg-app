@@ -172,8 +172,9 @@
     </div>
 
     <div class="form-group">
-        <label>商品类别</label>
+        <label>商品类别 <span>*</span></label>
         <select id="category">
+            <option value="" selected disabled>请选择商品类别</option>
             <option value="生活闲置">生活闲置</option>
             <option value="手机数码">手机数码</option>
             <option value="电脑办公">电脑办公</option>
@@ -267,7 +268,7 @@
 
         function triggerImageInput() {
             if (selectedImages.length >= 9) {
-                alert('最多上传 9 张图片');
+                tg.showAlert('最多上传 9 张图片');
                 return;
             }
             document.getElementById('imageInput').click();
@@ -278,7 +279,7 @@
             for (let file of files) {
                 if (selectedImages.length >= 9) break;
                 if (file.size > 10 * 1024 * 1024) {
-                    alert(`图片 [${file.name}] 超过 10MB，已被跳过`);
+                    tg.showAlert(`图片 [${file.name}] 超过 10MB，已被跳过`);
                     continue;
                 }
                 selectedImages.push(file);
@@ -319,7 +320,7 @@
             const file = e.target.files[0];
             if (file) {
                 if (file.size > 50 * 1024 * 1024) {
-                    alert('视频不能超过 50MB！请压缩后再试。');
+                    tg.showAlert('视频不能超过 50MB！请压缩后再试。');
                     e.target.value = '';
                     return;
                 }
@@ -435,15 +436,15 @@
             const deliveryMethods = Array.from(document.getElementById('deliveryTags').querySelectorAll('.tag-btn.active')).map(el => el.innerText);
             const deliveryStr = deliveryMethods.length > 0 ? deliveryMethods.join('/') : '自取/送货上门';
 
-            if (!title || !price || !contact) {
-                alert('请填写完整带 * 的必填项！');
+            if (!title || !price || !contact || !category) {
+                tg.showAlert('请填写完整带 * 的必填项！');
                 return;
             }
 
             const userId = tg.initDataUnsafe?.user?.id;
             const userName = tg.initDataUnsafe?.user?.first_name || '用户';
             if (!userId) {
-                alert('请在 Telegram 客户端内打开小程序！');
+                tg.showAlert('请在 Telegram 客户端内打开小程序！');
                 return;
             }
 
@@ -462,7 +463,7 @@
                     }
 
                     if (allFiles.length > 10) {
-                        alert('图片 + 视频总数最多 10 个（Telegram 相册上限），请删减后再提交');
+                        tg.showAlert('图片 + 视频总数最多 10 个（Telegram 相册上限），请删减后再提交');
                         submitBtn.innerText = "提交审核";
                         submitBtn.disabled = false;
                         return;
@@ -481,7 +482,7 @@
                                 mediaType = 'photo';
                                 mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
                             } else {
-                                alert("图片上传失败：" + (res.description || "未知错误"));
+                                tg.showAlert("图片上传失败：" + (res.description || "未知错误"));
                                 submitBtn.innerText = "提交审核";
                                 submitBtn.disabled = false;
                                 return;
@@ -503,7 +504,7 @@
                                 mediaType = 'video';
                                 mediaItems.push(`video:${res.result.video.file_id}`);
                             } else {
-                                alert("视频上传失败：" + (res.description || "请检查视频格式或文件大小"));
+                                tg.showAlert("视频上传失败：" + (res.description || "请检查视频格式或文件大小"));
                                 submitBtn.innerText = "提交审核";
                                 submitBtn.disabled = false;
                                 return;
@@ -548,7 +549,7 @@
                                 }
                             });
                         } else {
-                            alert("文件上传失败：" + (res.description || "请检查文件大小或格式"));
+                            tg.showAlert("文件上传失败：" + (res.description || "请检查文件大小或格式"));
                             submitBtn.innerText = "提交审核";
                             submitBtn.disabled = false;
                             return;
@@ -621,7 +622,7 @@
                 }).then(r => r.json());
 
                 if (!adminSendRes.ok) {
-                    alert('提交内容已生成，但通知管理员失败：' + (adminSendRes.description || '未知错误') + '\n（请检查 ADMIN_ID 是否正确，以及管理员是否已在 Telegram 中与机器人开始过对话）');
+                    tg.showAlert('提交内容已生成，但通知管理员失败：' + (adminSendRes.description || '未知错误') + '\n（请检查 ADMIN_ID 是否正确，以及管理员是否已在 Telegram 中与机器人开始过对话）');
                     submitBtn.innerText = "提交审核";
                     submitBtn.disabled = false;
                     return;
@@ -629,7 +630,7 @@
 
                 tg.close();
             } catch (err) {
-                alert('提交失败，请检查网络或更换视频重试');
+                tg.showAlert('提交失败，请检查网络或更换视频重试');
                 submitBtn.innerText = "提交审核";
                 submitBtn.disabled = false;
             }
