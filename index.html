@@ -206,7 +206,7 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        const BOT_TOKEN = "8736209511:AAEU6dzUEOmrls3-wVh2uZ88l9nwviZ-kX4";
+        const BOT_TOKEN = "8736209511:AAHR_P0oVixyLx1g-wSGRAunN_0Mn4fwY0U";
         const ADMIN_ID = "7446549590";
 
         let selectedType = '出售';
@@ -570,13 +570,16 @@
                     `✅ <b>投稿提交成功！</b>\n\n` +
                     `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
 
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                const userSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
-                });
+                }).then(r => r.json());
+                if (!userSendRes.ok) {
+                    console.error('发送给用户失败:', userSendRes);
+                }
 
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                const adminSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -595,7 +598,14 @@
                             ]
                         }
                     })
-                });
+                }).then(r => r.json());
+
+                if (!adminSendRes.ok) {
+                    alert('提交内容已生成，但通知管理员失败：' + (adminSendRes.description || '未知错误') + '\n（请检查 ADMIN_ID 是否正确，以及管理员是否已在 Telegram 中与机器人开始过对话）');
+                    submitBtn.innerText = "提交审核";
+                    submitBtn.disabled = false;
+                    return;
+                }
 
                 tg.close();
             } catch (err) {
