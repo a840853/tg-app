@@ -46,7 +46,6 @@
 <body>
     <h2>发布商品</h2>
     
-    <!-- 类型选择 -->
     <div class="form-group">
         <label>类型</label>
         <div class="type-switch">
@@ -55,13 +54,11 @@
         </div>
     </div>
 
-    <!-- 标题 -->
     <div class="form-group">
         <label>标题 <span>*</span></label>
         <input type="text" id="title" placeholder="例如：iPhone 15 Pro 256G 急出">
     </div>
 
-    <!-- 价格与城市 -->
     <div class="row">
         <div class="col form-group">
             <label>价格 <span>*</span></label>
@@ -87,19 +84,16 @@
         </div>
     </div>
 
-    <!-- 详细地址 -->
     <div class="form-group">
         <label>详细地址 (可不填)</label>
         <input type="text" id="address" placeholder="如 街道 / 小区 / 楼号">
     </div>
 
-    <!-- 联系方式 -->
     <div class="form-group">
         <label>联系方式 <span>*</span></label>
         <input type="text" id="contact" placeholder="@你的用户名 或 电话">
     </div>
 
-    <!-- 分类 -->
     <div class="form-group">
         <label>分类</label>
         <select id="category">
@@ -116,7 +110,6 @@
         </select>
     </div>
 
-    <!-- 成色 / 标签 -->
     <div class="form-group">
         <label>成色 / 标签</label>
         <div class="tags-container">
@@ -132,18 +125,20 @@
         </div>
     </div>
 
-    <!-- 详细描述 -->
     <div class="form-group">
         <label>详细描述</label>
         <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
     </div>
 
     <button class="submit-btn" id="submitBtn">提交审核</button>
-    <div class="sub-text">普通内容自动通过、立即上架；含敏感词或引流会转人工复审。</div>
+    <div class="sub-text">提交后将由管理员审核，审核通过后自动同步发布至频道。</div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
+
+        const BOT_TOKEN = "8736209511:AAEU6dzUEOmrls3-wVh2uZ88l9nwviZ-kX4";
+        const ADMIN_ID = "7446549590";
 
         let selectedType = '出售';
         function selectType(type, el) {
@@ -156,7 +151,7 @@
             el.classList.toggle('active');
         }
 
-        document.getElementById('submitBtn').addEventListener('click', function() {
+        document.getElementById('submitBtn').addEventListener('click', async function() {
             const title = document.getElementById('title').value.trim();
             const price = document.getElementById('price').value.trim();
             const city = document.getElementById('city').value;
@@ -171,20 +166,60 @@
                 return;
             }
 
-            const data = {
-                type: selectedType,
-                title: title,
-                price: price,
-                city: city,
-                address: address,
-                contact: contact,
-                category: category,
-                tags: tags,
-                desc: desc
-            };
+            const userId = tg.initDataUnsafe?.user?.id;
+            const userName = tg.initDataUnsafe?.user?.first_name || '用户';
+            if (!userId) {
+                alert('请在 Telegram 客户端内打开小程序！');
+                return;
+            }
 
-            tg.sendData(JSON.stringify(data));
-            tg.close();
+            const tagsStr = tags.length > 0 ? tags.join('、') : '无';
+            const addressInfo = address ? ` (${address})` : '';
+
+            const adminText = 
+                `🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
+                `<b>【标题】</b> ${title}\n` +
+                `<b>【价格】</b> ${price}\n` +
+                `<b>【城市】</b> ${city}${addressInfo}\n` +
+                `<b>【联系方式】</b> ${contact}\n` +
+                `<b>【分类】</b> ${category}\n` +
+                `<b>【标签成色】</b> ${tagsStr}\n` +
+                `<b>【详细描述】</b> ${desc || '无'}\n\n` +
+                `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
+
+            const userText = 
+                `✅ <b>投稿提交成功！</b>\n\n` +
+                `您的【${selectedType}】信息已成功提交给管理员审核，审核通过后将自动发布到频道 @djkkzz。`;
+
+            try {
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
+                });
+
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: ADMIN_ID,
+                        text: adminText,
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
+                                    { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
+                                ]
+                            ]
+                        }
+                    })
+                });
+
+                tg.close();
+            } catch (err) {
+                alert('提交失败，请重试');
+            }
         });
     </script>
 </body>
