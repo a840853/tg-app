@@ -41,7 +41,11 @@
             position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
             color: #ff5252; width: 20px; height: 20px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            font-size: 14px; font-weight: bold; cursor: pointer; line-height: 1;
+            font-size: 14px; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;
+        }
+        .video-badge {
+            position: absolute; bottom: 2px; left: 2px; background: rgba(0,0,0,0.6);
+            color: #fff; font-size: 10px; padding: 2px 4px; border-radius: 3px; z-index: 5;
         }
 
         .buy-notice {
@@ -91,8 +95,8 @@
         </div>
 
         <div class="form-group">
-            <label>视频 (可选，1个)</label>
-            <input type="file" id="videoInput" accept="video/*" style="display:none;" onchange="handleVideoSelect(event)">
+            <label>视频 (可选，1个，限制50MB以内)</label>
+            <input type="file" id="videoInput" accept="video/mp4,video/mov,video/quicktime,video/*" style="display:none;" onchange="handleVideoSelect(event)">
             <div class="media-grid" id="videoPreviewContainer"></div>
             <div class="upload-box" id="videoUploadBox" onclick="triggerVideoInput()" style="margin-top: 8px;">
                 <span style="font-size: 20px;">+</span>
@@ -228,6 +232,10 @@
             const files = Array.from(e.target.files);
             for (let file of files) {
                 if (selectedImages.length >= 9) break;
+                if (file.size > 10 * 1024 * 1024) {
+                    alert(`图片 [${file.name}] 超过 10MB，已被跳过`);
+                    continue;
+                }
                 selectedImages.push(file);
             }
             e.target.value = '';
@@ -265,6 +273,11 @@
         function handleVideoSelect(e) {
             const file = e.target.files[0];
             if (file) {
+                if (file.size > 50 * 1024 * 1024) {
+                    alert('视频不能超过 50MB！请压缩后再试。');
+                    e.target.value = '';
+                    return;
+                }
                 selectedVideo = file;
                 renderVideoPreview();
             }
@@ -284,13 +297,25 @@
                 uploadBox.style.display = 'none';
                 const div = document.createElement('div');
                 div.className = 'preview-item';
+                
                 const video = document.createElement('video');
                 video.src = URL.createObjectURL(selectedVideo);
+                video.setAttribute('playsinline', '');
+                video.setAttribute('muted', '');
+                video.setAttribute('autoplay', '');
+                video.loop = true;
+
+                const badge = document.createElement('div');
+                badge.className = 'video-badge';
+                badge.innerText = '🎬 视频';
+
                 const removeBtn = document.createElement('div');
                 removeBtn.className = 'remove-btn';
                 removeBtn.innerText = '×';
                 removeBtn.onclick = (e) => { e.stopPropagation(); removeVideo(); };
+                
                 div.appendChild(video);
+                div.appendChild(badge);
                 div.appendChild(removeBtn);
                 container.appendChild(div);
             } else {
@@ -322,7 +347,7 @@
                 return;
             }
 
-            submitBtn.innerText = "正在提交，请稍候...";
+            submitBtn.innerText = "正在准备提交...";
             submitBtn.disabled = true;
 
             try {
@@ -348,6 +373,11 @@
                             if (res.ok) {
                                 mediaType = 'photo';
                                 mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
+                            } else {
+                                alert("图片上传失败：" + (res.description || "未知错误"));
+                                submitBtn.innerText = "提交审核";
+                                submitBtn.disabled = false;
+                                return;
                             }
                         } else {
                             submitBtn.innerText = "正在上传视频...";
@@ -356,6 +386,11 @@
                             if (res.ok) {
                                 mediaType = 'video';
                                 mediaItems.push(`video:${res.result.video.file_id}`);
+                            } else {
+                                alert("视频上传失败：" + (res.description || "请检查视频格式或文件大小"));
+                                submitBtn.innerText = "提交审核";
+                                submitBtn.disabled = false;
+                                return;
                             }
                         }
                     } else if (allFiles.length > 1) {
@@ -373,14 +408,18 @@
 
                         if (res.ok) {
                             mediaType = 'group';
-                            res.result.forEach((msg, idx) => {
-                                const itemType = allFiles[idx].type;
-                                if (itemType === 'photo') {
-                                    mediaItems.push(`photo:${msg.photo.pop().file_id}`);
-                                } else if (itemType === 'video') {
+                            res.result.forEach((msg) => {
+                                if (msg.photo && msg.photo.length > 0) {
+                                    mediaItems.push(`photo:${msg.photo[msg.photo.length - 1].file_id}`);
+                                } else if (msg.video) {
                                     mediaItems.push(`video:${msg.video.file_id}`);
                                 }
                             });
+                        } else {
+                            alert("文件上传失败：" + (res.description || "请检查文件大小或格式"));
+                            submitBtn.innerText = "提交审核";
+                            submitBtn.disabled = false;
+                            return;
                         }
                     }
                 } else if (selectedType === '求购') {
@@ -440,7 +479,7 @@
 
                 tg.close();
             } catch (err) {
-                alert('提交失败，请检查网络重试');
+                alert('提交失败，请检查网络或更换视频重试');
                 submitBtn.innerText = "提交审核";
                 submitBtn.disabled = false;
             }
