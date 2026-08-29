@@ -421,6 +421,9 @@
                             submitBtn.disabled = false;
                             return;
                         }
+                    } else {
+                        // 出售但未上传任何图片/视频，使用平台预设的出售默认图
+                        mediaType = 'sell_default';
                     }
                 } else if (selectedType === '求购') {
                     mediaType = 'buy';
