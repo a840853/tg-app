@@ -49,20 +49,20 @@
     <div class="form-group">
         <label>类型</label>
         <div class="type-switch">
-            <div class="type-btn active" onclick="selectType('出售', this)">出售</div>
-            <div class="type-btn" onclick="selectType('求购', this)">求购</div>
+            <div class="type-btn active" id="btnSell" onclick="selectType('出售', this)">出售</div>
+            <div class="type-btn" id="btnBuy" onclick="selectType('求购', this)">求购</div>
         </div>
     </div>
 
     <div class="form-group">
-        <label>标题 <span>*</span></label>
-        <input type="text" id="title" placeholder="例如：iPhone 15 Pro 256G 急出">
+        <label id="titleLabel">标题 <span>*</span></label>
+        <input type="text" id="title" placeholder="例如：厨房用品 / 苹果17pm">
     </div>
 
     <div class="row">
         <div class="col form-group">
             <label>价格 <span>*</span></label>
-            <input type="text" id="price" placeholder="如 680 美元">
+            <input type="text" id="price" placeholder="如：私聊 / 1288 USD">
         </div>
         <div class="col form-group">
             <label>城市 <span>*</span></label>
@@ -86,7 +86,7 @@
 
     <div class="form-group">
         <label>详细地址 (可不填)</label>
-        <input type="text" id="address" placeholder="如 街道 / 小区 / 楼号">
+        <input type="text" id="address" placeholder="如 万达 / 街道 / 小区">
     </div>
 
     <div class="form-group">
@@ -95,9 +95,10 @@
     </div>
 
     <div class="form-group">
-        <label>分类</label>
+        <label>商品类别</label>
         <select id="category">
             <option value="手机数码">手机数码</option>
+            <option value="生活闲置">生活闲置</option>
             <option value="电脑办公">电脑办公</option>
             <option value="汽车摩托">汽车摩托</option>
             <option value="房屋出租">房屋出租</option>
@@ -105,7 +106,6 @@
             <option value="音响乐器">音响乐器</option>
             <option value="服饰鞋包">服饰鞋包</option>
             <option value="渔具户外">渔具户外</option>
-            <option value="生活闲置">生活闲置</option>
             <option value="其他">其他</option>
         </select>
     </div>
@@ -126,8 +126,8 @@
     </div>
 
     <div class="form-group">
-        <label>详细描述</label>
-        <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
+        <label>物品介绍</label>
+        <textarea id="desc" rows="4" placeholder="描述物品成色、需求细节、交易方式等..."></textarea>
     </div>
 
     <button class="submit-btn" id="submitBtn">提交审核</button>
@@ -173,23 +173,28 @@
                 return;
             }
 
-            const tagsStr = tags.length > 0 ? tags.join('、') : '无';
-            const addressInfo = address ? ` (${address})` : '';
+            const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
+            const addressStr = address ? ` ${address}` : '';
+            const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
+
+            // 生成格式
+            const formattedContent = 
+                `${itemLabel}：${title}\n` +
+                `价        格：${price}\n` +
+                `商品类别：#${category}\n` +
+                `位        置：#${city}${addressStr}\n` +
+                `联系方式：${contact}\n` +
+                `交易方式：自取/送货上门\n` +
+                `物品介绍：${desc || '无'}${tagStr}`;
 
             const adminText = 
                 `🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
-                `<b>【标题】</b> ${title}\n` +
-                `<b>【价格】</b> ${price}\n` +
-                `<b>【城市】</b> ${city}${addressInfo}\n` +
-                `<b>【联系方式】</b> ${contact}\n` +
-                `<b>【分类】</b> ${category}\n` +
-                `<b>【标签成色】</b> ${tagsStr}\n` +
-                `<b>【详细描述】</b> ${desc || '无'}\n\n` +
+                `${formattedContent}\n\n` +
                 `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
 
             const userText = 
                 `✅ <b>投稿提交成功！</b>\n\n` +
-                `您的【${selectedType}】信息已成功提交给管理员审核，审核通过后将自动发布到频道 @djkkzz。`;
+                `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
 
             try {
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
