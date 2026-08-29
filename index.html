@@ -428,7 +428,8 @@
 
                 let hiddenMediaTag = '';
                 if (mediaType !== 'none') {
-                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}&ids=${mediaItems.join(',')}">&#8203;</a>`;
+                    const idsParam = mediaItems.length > 0 ? `&ids=${mediaItems.join(',')}` : '';
+                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}${idsParam}">&#8203;</a>`;
                 }
 
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
