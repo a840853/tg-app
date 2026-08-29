@@ -164,6 +164,14 @@
     </div>
 
     <div class="form-group">
+        <label>交易方式 <span>*</span></label>
+        <div class="tags-container" id="deliveryTags">
+            <div class="tag-btn active" onclick="toggleDelivery(this)">自取</div>
+            <div class="tag-btn active" onclick="toggleDelivery(this)">送货上门</div>
+        </div>
+    </div>
+
+    <div class="form-group">
         <label>商品类别</label>
         <select id="category">
             <option value="生活闲置">生活闲置</option>
@@ -231,6 +239,16 @@
         }
 
         function toggleTag(el) {
+            el.classList.toggle('active');
+        }
+
+        function toggleDelivery(el) {
+            const container = el.parentElement;
+            const activeCount = container.querySelectorAll('.tag-btn.active').length;
+            // 至少保留一个选中，避免用户两个都取消导致交易方式为空
+            if (el.classList.contains('active') && activeCount === 1) {
+                return;
+            }
             el.classList.toggle('active');
         }
 
@@ -413,7 +431,9 @@
             const contact = document.getElementById('contact').value.trim();
             const category = document.getElementById('category').value;
             const desc = document.getElementById('desc').value.trim();
-            const tags = Array.from(document.querySelectorAll('.tag-btn.active')).map(el => el.innerText);
+            const tags = Array.from(document.querySelectorAll('.tag-btn.active')).filter(el => el.closest('#deliveryTags') === null).map(el => el.innerText);
+            const deliveryMethods = Array.from(document.getElementById('deliveryTags').querySelectorAll('.tag-btn.active')).map(el => el.innerText);
+            const deliveryStr = deliveryMethods.length > 0 ? deliveryMethods.join('/') : '自取/送货上门';
 
             if (!title || !price || !contact) {
                 alert('请填写完整带 * 的必填项！');
@@ -558,7 +578,7 @@
                     `商品类别：#${category}\n` +
                     `位        置：#${city}${addressStr}\n` +
                     `联系方式：${contact}\n` +
-                    `交易方式：自取/送货上门\n` +
+                    `交易方式：${deliveryStr}\n` +
                     `物品介绍：${desc || '无'}${tagStr}`;
 
                 const adminText = 
