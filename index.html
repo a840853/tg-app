@@ -25,7 +25,6 @@
         }
         .type-btn.active { background: #ff6b35; border-color: #ff6b35; }
 
-        /* 媒体上传样式 */
         .media-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
         .upload-box {
             width: 80px; height: 80px; border: 2px dashed #3a4756; border-radius: 8px;
@@ -80,14 +79,11 @@
         </div>
     </div>
 
-    <!-- 媒体选择区（出售显示，求购隐藏） -->
     <div id="mediaContainer">
         <div class="form-group">
             <label>商品图片 (第一张为封面，最多9张)</label>
             <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
-            <div class="media-grid" id="imagePreviewGrid">
-                <!-- 动态预览图片 -->
-            </div>
+            <div class="media-grid" id="imagePreviewGrid"></div>
             <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
                 <span style="font-size: 20px;">+</span>
                 <span>添加图片</span>
@@ -105,7 +101,6 @@
         </div>
     </div>
 
-    <!-- 求购专属提示 -->
     <div class="buy-notice" id="buyNotice">
         📌 求购信息将自动使用平台专属【求购】封面图统一发布。
     </div>
@@ -221,7 +216,6 @@
             el.classList.toggle('active');
         }
 
-        // 图片选择逻辑
         function triggerImageInput() {
             if (selectedImages.length >= 9) {
                 alert('最多上传 9 张图片');
@@ -264,7 +258,6 @@
             document.getElementById('imageUploadBox').style.display = selectedImages.length >= 9 ? 'none' : 'flex';
         }
 
-        // 视频选择逻辑
         function triggerVideoInput() {
             document.getElementById('videoInput').click();
         }
@@ -305,7 +298,6 @@
             }
         }
 
-        // 提交逻辑
         document.getElementById('submitBtn').addEventListener('click', async function() {
             const submitBtn = document.getElementById('submitBtn');
             
@@ -335,55 +327,60 @@
 
             try {
                 let mediaType = 'none';
-                let mediaFileIds = [];
+                let mediaItems = [];
 
                 if (selectedType === '出售') {
-                    if (selectedImages.length === 1) {
-                        submitBtn.innerText = "正在上传图片...";
+                    let allFiles = [];
+                    selectedImages.forEach(img => allFiles.push({ type: 'photo', file: img }));
+                    if (selectedVideo) {
+                        allFiles.push({ type: 'video', file: selectedVideo });
+                    }
+
+                    if (allFiles.length === 1) {
+                        const item = allFiles[0];
                         const formData = new FormData();
                         formData.append('chat_id', ADMIN_ID);
-                        formData.append('photo', selectedImages[0]);
 
-                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-                            method: 'POST', body: formData
-                        }).then(r => r.json());
-
-                        if (res.ok) {
-                            mediaType = 'photo';
-                            mediaFileIds.push(res.result.photo.pop().file_id);
+                        if (item.type === 'photo') {
+                            submitBtn.innerText = "正在上传图片...";
+                            formData.append('photo', item.file);
+                            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData }).then(r => r.json());
+                            if (res.ok) {
+                                mediaType = 'photo';
+                                mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
+                            }
+                        } else {
+                            submitBtn.innerText = "正在上传视频...";
+                            formData.append('video', item.file);
+                            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: formData }).then(r => r.json());
+                            if (res.ok) {
+                                mediaType = 'video';
+                                mediaItems.push(`video:${res.result.video.file_id}`);
+                            }
                         }
-                    } else if (selectedImages.length > 1) {
-                        submitBtn.innerText = `正在上传 ${selectedImages.length} 张图片...`;
+                    } else if (allFiles.length > 1) {
+                        submitBtn.innerText = `正在上传 ${allFiles.length} 个媒体文件...`;
                         const formData = new FormData();
                         formData.append('chat_id', ADMIN_ID);
 
-                        const mediaArray = selectedImages.map((img, i) => {
-                            formData.append(`file${i}`, img);
-                            return { type: 'photo', media: `attach://file${i}` };
+                        const mediaArray = allFiles.map((item, i) => {
+                            formData.append(`file${i}`, item.file);
+                            return { type: item.type, media: `attach://file${i}` };
                         });
                         formData.append('media', JSON.stringify(mediaArray));
 
-                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, {
-                            method: 'POST', body: formData
-                        }).then(r => r.json());
+                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, { method: 'POST', body: formData }).then(r => r.json());
 
                         if (res.ok) {
-                            mediaType = 'photos';
-                            res.result.forEach(msg => mediaFileIds.push(msg.photo.pop().file_id));
-                        }
-                    } else if (selectedVideo) {
-                        submitBtn.innerText = "正在上传视频...";
-                        const formData = new FormData();
-                        formData.append('chat_id', ADMIN_ID);
-                        formData.append('video', selectedVideo);
-
-                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, {
-                            method: 'POST', body: formData
-                        }).then(r => r.json());
-
-                        if (res.ok) {
-                            mediaType = 'video';
-                            mediaFileIds.push(res.result.video.file_id);
+                            mediaType = 'group';
+                            res.result.forEach((msg, idx) => {
+                                const itemType = allFiles[idx].type;
+                                if (itemType === 'photo') {
+                                    mediaItems.push(`photo:${msg.photo.pop().file_id}`);
+                                } else if (itemType === 'video') {
+                                    mediaItems.push(`video:${msg.video.file_id}`);
+                                }
+                            });
                         }
                     }
                 } else if (selectedType === '求购') {
@@ -392,7 +389,7 @@
 
                 let hiddenMediaTag = '';
                 if (mediaType !== 'none') {
-                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}&ids=${mediaFileIds.join(',')}">&#8203;</a>`;
+                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}&ids=${mediaItems.join(',')}">&#8203;</a>`;
                 }
 
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
