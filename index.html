@@ -1,489 +1,162 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>发布商品</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: #17212b; color: #ffffff; padding: 16px; margin: 0; font-size: 14px; }
-        h2 { text-align: center; margin-top: 0; margin-bottom: 20px; font-size: 18px; }
-        .form-group { margin-bottom: 16px; }
-        label { display: block; margin-bottom: 6px; color: #8e9ca8; font-size: 13px; font-weight: 500; }
-        label span { color: #ff5252; }
-        input, select, textarea {
-            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #242f3d;
-            background-color: #242f3d; color: #fff; font-size: 14px; outline: none;
-        }
-        input:focus, select:focus, textarea:focus { border-color: #ff6b35; }
-        
-        .type-switch { display: flex; gap: 10px; }
-        .type-btn {
-            flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #242f3d;
-            background: #242f3d; color: #fff; text-align: center; cursor: pointer; font-weight: bold;
-        }
-        .type-btn.active { background: #ff6b35; border-color: #ff6b35; }
+import os
+import re
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, InputMediaPhoto, InputMediaVideo
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-        .media-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
-        .upload-box {
-            width: 80px; height: 80px; border: 2px dashed #3a4756; border-radius: 8px;
-            background: #242f3d; display: flex; flex-direction: column; align-items: center;
-            justify-content: center; cursor: pointer; color: #8e9ca8; font-size: 11px; text-align: center;
-        }
-        .upload-box:hover { border-color: #ff6b35; color: #ff6b35; }
-        .preview-item {
-            width: 80px; height: 80px; border-radius: 8px; position: relative; overflow: hidden;
-            border: 1px solid #3a4756; background: #000;
-        }
-        .preview-item img, .preview-item video { width: 100%; height: 100%; object-fit: cover; }
-        .preview-item .remove-btn {
-            position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
-            color: #ff5252; width: 20px; height: 20px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 14px; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;
-        }
-        .video-badge {
-            position: absolute; bottom: 2px; left: 2px; background: rgba(0,0,0,0.6);
-            color: #fff; font-size: 10px; padding: 2px 4px; border-radius: 3px; z-index: 5;
-        }
+BOT_TOKEN = "8736209511:AAEU6dzUEOmrls3-wVh2uZ88l9nwviZ-kX4"
+WEB_APP_URL = "https://a840853.github.io/tg-app/?v=18"
+CHANNEL_ID = "@djkkzz"
 
-        .buy-notice {
-            background: #242f3d; padding: 12px; border-radius: 8px; color: #ff9800;
-            font-size: 13px; margin-bottom: 16px; border-left: 4px solid #ff9800; display: none;
-        }
+BUY_IMAGE_PATH = r"C:\ershou\qiugou.jpg"
 
-        .row { display: flex; gap: 10px; }
-        .col { flex: 1; }
+REPLY_KEYBOARD = [
+    ["📦 出售物品", "🛒 求购物品"],
+    ["🏠 房屋转租", "🐾 宠物领养"],
+    ["🆘 求助", "🔎 寻物/招领"],
+    ["📞 联系客服"]
+]
 
-        .tags-container { display: flex; flex-wrap: wrap; gap: 8px; }
-        .tag-btn {
-            padding: 8px 14px; border-radius: 6px; background: #242f3d; color: #fff;
-            font-size: 13px; cursor: pointer; border: 1px solid transparent; user-select: none;
-        }
-        .tag-btn.active { background: #3a4756; border-color: #ff6b35; color: #ff6b35; }
+TEMPLATES = {
+    "📦 出售物品": "出售物品：\n价        格：\n位        置：\n联系方式：\n交易方式：自取/送货上门\n物品介绍：",
+    "🛒 求购物品": "求购物品：\n价        格：\n位        置：\n联系方式：\n交易方式：自取/送货上门\n物品介绍：",
+    "🏠 房屋转租": "房屋转租：\n租        金：\n位        置：\n介        绍：\n押        金：\n入住时间：\n联系方式：",
+    "🐾 宠物领养": "宠物领养：(送养 / 求领养)\n品        种：\n位        置：\n领养要求：\n联系方式：",
+    "🆘 求助": "求助：\n位        置：\n联系方式：\n详细说明：",
+    "🔎 寻物/招领": "寻物/招领：(拾获 / 寻物)\n物        品：\n时间地点：\n特征描述：\n联系方式："
+}
 
-        .submit-btn {
-            width: 100%; padding: 14px; background-color: #ff6b35; color: white;
-            border: none; border-radius: 8px; font-size: 16px; font-weight: bold;
-            margin-top: 20px; cursor: pointer;
-        }
-        .submit-btn:disabled { background-color: #555; cursor: not-allowed; }
-        .sub-text { font-size: 11px; color: #7f8c8d; text-align: center; margin-top: 8px; }
-    </style>
-</head>
-<body>
-    <h2>发布商品</h2>
-    
-    <div class="form-group">
-        <label>类型</label>
-        <div class="type-switch">
-            <div class="type-btn active" onclick="selectType('出售', this)">出售</div>
-            <div class="type-btn" onclick="selectType('求购', this)">求购</div>
-        </div>
-    </div>
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reply_markup = ReplyKeyboardMarkup(REPLY_KEYBOARD, resize_keyboard=True)
+    await update.message.reply_text(
+        "欢迎来到二手市场投稿系统\n\n📌 点击下方按钮获取对应模板：",
+        reply_markup=reply_markup
+    )
 
-    <div id="mediaContainer">
-        <div class="form-group">
-            <label>商品图片 (第一张为封面，最多9张)</label>
-            <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
-            <div class="media-grid" id="imagePreviewGrid"></div>
-            <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
-                <span style="font-size: 20px;">+</span>
-                <span>添加图片</span>
-            </div>
-        </div>
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
 
-        <div class="form-group">
-            <label>视频 (可选，1个，限制50MB以内)</label>
-            <input type="file" id="videoInput" accept="video/mp4,video/mov,video/quicktime,video/*" style="display:none;" onchange="handleVideoSelect(event)">
-            <div class="media-grid" id="videoPreviewContainer"></div>
-            <div class="upload-box" id="videoUploadBox" onclick="triggerVideoInput()" style="margin-top: 8px;">
-                <span style="font-size: 20px;">+</span>
-                <span>添加视频</span>
-            </div>
-        </div>
-    </div>
+    if text == "📦 出售物品":
+        template_content = f"<code>{TEMPLATES['📦 出售物品']}</code>\n\n💡 不想编辑？也可以点击下方按钮一键发布 👇"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 我要出售", web_app=WebAppInfo(url=WEB_APP_URL))]])
+        await update.message.reply_text(template_content, parse_mode="HTML", reply_markup=keyboard)
 
-    <div class="buy-notice" id="buyNotice">
-        📌 求购信息将自动使用平台专属【求购】封面图统一发布。
-    </div>
+    elif text == "🛒 求购物品":
+        template_content = f"<code>{TEMPLATES['🛒 求购物品']}</code>\n\n💡 不想编辑？也可以点击下方按钮一键发布 👇"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📣 我要求购", web_app=WebAppInfo(url=WEB_APP_URL))]])
+        await update.message.reply_text(template_content, parse_mode="HTML", reply_markup=keyboard)
 
-    <div class="form-group">
-        <label>标题 <span>*</span></label>
-        <input type="text" id="title" placeholder="例如：iPhone 15 Pro / 厨房用品">
-    </div>
+    elif text in TEMPLATES:
+        template_content = f"<code>{TEMPLATES[text]}</code>"
+        await update.message.reply_text(template_content, parse_mode="HTML")
 
-    <div class="row">
-        <div class="col form-group">
-            <label>价格 <span>*</span></label>
-            <input type="text" id="price" placeholder="如：私聊 / 680 美元">
-        </div>
-        <div class="col form-group">
-            <label>城市 <span>*</span></label>
-            <select id="city">
-                <option value="西港">西港</option>
-                <option value="金边">金边</option>
-                <option value="波贝">波贝</option>
-                <option value="木牌">木牌</option>
-                <option value="戈公">戈公</option>
-                <option value="拜林">拜林</option>
-                <option value="菩萨">菩萨</option>
-                <option value="财通">财通</option>
-                <option value="磅湛">磅湛</option>
-                <option value="暹粒">暹粒</option>
-                <option value="贡布">贡布</option>
-                <option value="白马">白马</option>
-                <option value="其他">其他</option>
-            </select>
-        </div>
-    </div>
+    elif text == "📞 联系客服":
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("联系人工客服", url="https://t.me/kongzi01")]])
+        await update.message.reply_text("👇 点击下方按钮打开人工客服 @kongzi01 的私聊窗口,直接发消息即可。", reply_markup=keyboard)
 
-    <div class="form-group">
-        <label>详细地址 (可不填)</label>
-        <input type="text" id="address" placeholder="如 万达 / 街道 / 小区">
-    </div>
+async def handle_audit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-    <div class="form-group">
-        <label>联系方式 <span>*</span></label>
-        <input type="text" id="contact" placeholder="@你的用户名 或 电话">
-    </div>
+    data = query.data.split("|")
+    action = data[0]
+    user_id = data[1] if len(data) > 1 else None
 
-    <div class="form-group">
-        <label>商品类别</label>
-        <select id="category">
-            <option value="生活闲置">生活闲置</option>
-            <option value="手机数码">手机数码</option>
-            <option value="电脑办公">电脑办公</option>
-            <option value="汽车摩托">汽车摩托</option>
-            <option value="房屋出租">房屋出租</option>
-            <option value="家具家电">家具家电</option>
-            <option value="音响乐器">音响乐器</option>
-            <option value="服饰鞋包">服饰鞋包</option>
-            <option value="渔具户外">渔具户外</option>
-            <option value="其他">其他</option>
-        </select>
-    </div>
+    original_html = query.message.text_html
 
-    <div class="form-group">
-        <label>成色 / 标签</label>
-        <div class="tags-container">
-            <div class="tag-btn" onclick="toggleTag(this)">全新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">99新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">95新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">9成新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">8成新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">急出</div>
-            <div class="tag-btn" onclick="toggleTag(this)">可小刀</div>
-            <div class="tag-btn" onclick="toggleTag(this)">带包装</div>
-            <div class="tag-btn" onclick="toggleTag(this)">带票</div>
-        </div>
-    </div>
+    if action == "approve":
+        lines = original_html.split("\n")
+        clean_lines = []
+        for line in lines:
+            # 过滤掉不需要的顶部标题、审核提示和底部投稿人信息
+            text_plain = re.sub(r'<[^>]+>', '', line).strip()
+            if not text_plain:
+                continue
+            if any(k in text_plain for k in ["收到新的", "等待审核", "投稿人"]):
+                continue
+            clean_lines.append(line)
 
-    <div class="form-group">
-        <label>物品介绍</label>
-        <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
-    </div>
+        # 仅保留纯粹的商品详情内容
+        channel_post = "\n".join(clean_lines)
 
-    <button class="submit-btn" id="submitBtn">提交审核</button>
-    <div class="sub-text">提交后将由管理员审核，审核通过后自动同步发布至频道。</div>
+        match = re.search(r'href="https://tgmedia\.app/\?type=(\w+)(?:&(?:amp;)?ids=([^"]+))?"', original_html)
+        media_type = match.group(1) if match else 'none'
+        media_ids_str = match.group(2) if match and match.group(2) else ''
 
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
+        try:
+            if media_type == 'buy':
+                if os.path.exists(BUY_IMAGE_PATH):
+                    with open(BUY_IMAGE_PATH, 'rb') as photo_file:
+                        await context.bot.send_photo(
+                            chat_id=CHANNEL_ID,
+                            photo=photo_file,
+                            caption=channel_post,
+                            parse_mode="HTML"
+                        )
+                else:
+                    await context.bot.send_message(chat_id=CHANNEL_ID, text=channel_post, parse_mode="HTML")
 
-        const BOT_TOKEN = "8736209511:AAEU6dzUEOmrls3-wVh2uZ88l9nwviZ-kX4";
-        const ADMIN_ID = "7446549590";
+            elif media_type == 'photo':
+                fid = media_ids_str.replace('photo:', '')
+                await context.bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=fid,
+                    caption=channel_post,
+                    parse_mode="HTML"
+                )
 
-        let selectedType = '出售';
-        let selectedImages = [];
-        let selectedVideo = null;
+            elif media_type == 'video':
+                fid = media_ids_str.replace('video:', '')
+                await context.bot.send_video(
+                    chat_id=CHANNEL_ID,
+                    video=fid,
+                    caption=channel_post,
+                    parse_mode="HTML"
+                )
 
-        function selectType(type, el) {
-            selectedType = type;
-            document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
-            el.classList.add('active');
-
-            const mediaContainer = document.getElementById('mediaContainer');
-            const buyNotice = document.getElementById('buyNotice');
-
-            if (type === '求购') {
-                mediaContainer.style.display = 'none';
-                buyNotice.style.display = 'block';
-            } else {
-                mediaContainer.style.display = 'block';
-                buyNotice.style.display = 'none';
-            }
-        }
-
-        function toggleTag(el) {
-            el.classList.toggle('active');
-        }
-
-        function triggerImageInput() {
-            if (selectedImages.length >= 9) {
-                alert('最多上传 9 张图片');
-                return;
-            }
-            document.getElementById('imageInput').click();
-        }
-
-        function handleImageSelect(e) {
-            const files = Array.from(e.target.files);
-            for (let file of files) {
-                if (selectedImages.length >= 9) break;
-                if (file.size > 10 * 1024 * 1024) {
-                    alert(`图片 [${file.name}] 超过 10MB，已被跳过`);
-                    continue;
-                }
-                selectedImages.push(file);
-            }
-            e.target.value = '';
-            renderImagePreviews();
-        }
-
-        function removeImage(index) {
-            selectedImages.splice(index, 1);
-            renderImagePreviews();
-        }
-
-        function renderImagePreviews() {
-            const container = document.getElementById('imagePreviewGrid');
-            container.innerHTML = '';
-            selectedImages.forEach((file, index) => {
-                const div = document.createElement('div');
-                div.className = 'preview-item';
-                const img = document.createElement('img');
-                img.src = URL.createObjectURL(file);
-                const removeBtn = document.createElement('div');
-                removeBtn.className = 'remove-btn';
-                removeBtn.innerText = '×';
-                removeBtn.onclick = (e) => { e.stopPropagation(); removeImage(index); };
-                div.appendChild(img);
-                div.appendChild(removeBtn);
-                container.appendChild(div);
-            });
-            document.getElementById('imageUploadBox').style.display = selectedImages.length >= 9 ? 'none' : 'flex';
-        }
-
-        function triggerVideoInput() {
-            document.getElementById('videoInput').click();
-        }
-
-        function handleVideoSelect(e) {
-            const file = e.target.files[0];
-            if (file) {
-                if (file.size > 50 * 1024 * 1024) {
-                    alert('视频不能超过 50MB！请压缩后再试。');
-                    e.target.value = '';
-                    return;
-                }
-                selectedVideo = file;
-                renderVideoPreview();
-            }
-            e.target.value = '';
-        }
-
-        function removeVideo() {
-            selectedVideo = null;
-            renderVideoPreview();
-        }
-
-        function renderVideoPreview() {
-            const container = document.getElementById('videoPreviewContainer');
-            container.innerHTML = '';
-            const uploadBox = document.getElementById('videoUploadBox');
-            if (selectedVideo) {
-                uploadBox.style.display = 'none';
-                const div = document.createElement('div');
-                div.className = 'preview-item';
+            elif media_type in ['photos', 'group']:
+                items = media_ids_str.split(',')
+                media_group = []
                 
-                const video = document.createElement('video');
-                video.src = URL.createObjectURL(selectedVideo);
-                video.setAttribute('playsinline', '');
-                video.setAttribute('muted', '');
-                video.setAttribute('autoplay', '');
-                video.loop = true;
+                for idx, item in enumerate(items):
+                    if ':' in item:
+                        itype, fid = item.split(':', 1)
+                    else:
+                        itype, fid = 'photo', item
 
-                const badge = document.createElement('div');
-                badge.className = 'video-badge';
-                badge.innerText = '🎬 视频';
+                    caption = channel_post if idx == 0 else None
+                    parse_mode = "HTML" if idx == 0 else None
 
-                const removeBtn = document.createElement('div');
-                removeBtn.className = 'remove-btn';
-                removeBtn.innerText = '×';
-                removeBtn.onclick = (e) => { e.stopPropagation(); removeVideo(); };
-                
-                div.appendChild(video);
-                div.appendChild(badge);
-                div.appendChild(removeBtn);
-                container.appendChild(div);
-            } else {
-                uploadBox.style.display = 'flex';
-            }
-        }
+                    if itype == 'video':
+                        media_group.append(InputMediaVideo(media=fid, caption=caption, parse_mode=parse_mode))
+                    else:
+                        media_group.append(InputMediaPhoto(media=fid, caption=caption, parse_mode=parse_mode))
 
-        document.getElementById('submitBtn').addEventListener('click', async function() {
-            const submitBtn = document.getElementById('submitBtn');
+                await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media_group)
+
+            else:
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=channel_post, parse_mode="HTML")
+
+            await query.edit_message_text(f"✅ <b>【已审核通过并发布至 {CHANNEL_ID}】</b>\n\n{original_html}", parse_mode="HTML")
             
-            const title = document.getElementById('title').value.trim();
-            const price = document.getElementById('price').value.trim();
-            const city = document.getElementById('city').value;
-            const address = document.getElementById('address').value.trim();
-            const contact = document.getElementById('contact').value.trim();
-            const category = document.getElementById('category').value;
-            const desc = document.getElementById('desc').value.trim();
-            const tags = Array.from(document.querySelectorAll('.tag-btn.active')).map(el => el.innerText);
+            if user_id:
+                await context.bot.send_message(
+                    chat_id=int(user_id),
+                    text=f"🎉 <b>恭喜！</b>您的投稿已通过审核，并成功发布到频道 {CHANNEL_ID} ！",
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            await query.message.reply_text(f"⚠️ 发布失败，请检查机器人权限：{e}")
 
-            if (!title || !price || !contact) {
-                alert('请填写完整带 * 的必填项！');
-                return;
-            }
+    elif action == "reject":
+        await query.edit_message_text(f"❌ <b>【已拒绝该投稿】</b>\n\n{original_html}", parse_mode="HTML")
+        if user_id:
+            await context.bot.send_message(chat_id=int(user_id), text="❌ 很抱歉，您的投稿未通过审核。")
 
-            const userId = tg.initDataUnsafe?.user?.id;
-            const userName = tg.initDataUnsafe?.user?.first_name || '用户';
-            if (!userId) {
-                alert('请在 Telegram 客户端内打开小程序！');
-                return;
-            }
-
-            submitBtn.innerText = "正在准备提交...";
-            submitBtn.disabled = true;
-
-            try {
-                let mediaType = 'none';
-                let mediaItems = [];
-
-                if (selectedType === '出售') {
-                    let allFiles = [];
-                    selectedImages.forEach(img => allFiles.push({ type: 'photo', file: img }));
-                    if (selectedVideo) {
-                        allFiles.push({ type: 'video', file: selectedVideo });
-                    }
-
-                    if (allFiles.length === 1) {
-                        const item = allFiles[0];
-                        const formData = new FormData();
-                        formData.append('chat_id', ADMIN_ID);
-
-                        if (item.type === 'photo') {
-                            submitBtn.innerText = "正在上传图片...";
-                            formData.append('photo', item.file);
-                            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData }).then(r => r.json());
-                            if (res.ok) {
-                                mediaType = 'photo';
-                                mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
-                            } else {
-                                alert("图片上传失败：" + (res.description || "未知错误"));
-                                submitBtn.innerText = "提交审核";
-                                submitBtn.disabled = false;
-                                return;
-                            }
-                        } else {
-                            submitBtn.innerText = "正在上传视频...";
-                            formData.append('video', item.file);
-                            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: formData }).then(r => r.json());
-                            if (res.ok) {
-                                mediaType = 'video';
-                                mediaItems.push(`video:${res.result.video.file_id}`);
-                            } else {
-                                alert("视频上传失败：" + (res.description || "请检查视频格式或文件大小"));
-                                submitBtn.innerText = "提交审核";
-                                submitBtn.disabled = false;
-                                return;
-                            }
-                        }
-                    } else if (allFiles.length > 1) {
-                        submitBtn.innerText = `正在上传 ${allFiles.length} 个媒体文件...`;
-                        const formData = new FormData();
-                        formData.append('chat_id', ADMIN_ID);
-
-                        const mediaArray = allFiles.map((item, i) => {
-                            formData.append(`file${i}`, item.file);
-                            return { type: item.type, media: `attach://file${i}` };
-                        });
-                        formData.append('media', JSON.stringify(mediaArray));
-
-                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, { method: 'POST', body: formData }).then(r => r.json());
-
-                        if (res.ok) {
-                            mediaType = 'group';
-                            res.result.forEach((msg) => {
-                                if (msg.photo && msg.photo.length > 0) {
-                                    mediaItems.push(`photo:${msg.photo[msg.photo.length - 1].file_id}`);
-                                } else if (msg.video) {
-                                    mediaItems.push(`video:${msg.video.file_id}`);
-                                }
-                            });
-                        } else {
-                            alert("文件上传失败：" + (res.description || "请检查文件大小或格式"));
-                            submitBtn.innerText = "提交审核";
-                            submitBtn.disabled = false;
-                            return;
-                        }
-                    }
-                } else if (selectedType === '求购') {
-                    mediaType = 'buy';
-                }
-
-                let hiddenMediaTag = '';
-                if (mediaType !== 'none') {
-                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}&ids=${mediaItems.join(',')}">&#8203;</a>`;
-                }
-
-                const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
-                const addressStr = address ? ` ${address}` : '';
-                const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
-
-                const formattedContent = 
-                    `${itemLabel}：${title}\n` +
-                    `价        格：${price}\n` +
-                    `商品类别：#${category}\n` +
-                    `位        置：#${city}${addressStr}\n` +
-                    `联系方式：${contact}\n` +
-                    `交易方式：自取/送货上门\n` +
-                    `物品介绍：${desc || '无'}${tagStr}`;
-
-                const adminText = 
-                    `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
-                    `${formattedContent}\n\n` +
-                    `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
-
-                const userText = 
-                    `✅ <b>投稿提交成功！</b>\n\n` +
-                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
-
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
-                });
-
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: ADMIN_ID,
-                        text: adminText,
-                        parse_mode: 'HTML',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
-                                    { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
-                                ]
-                            ]
-                        }
-                    })
-                });
-
-                tg.close();
-            } catch (err) {
-                alert('提交失败，请检查网络或更换视频重试');
-                submitBtn.innerText = "提交审核";
-                submitBtn.disabled = false;
-            }
-        });
-    </script>
-</body>
-</html>
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(handle_audit_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    print("机器人已启动...")
+    app.run_polling()
