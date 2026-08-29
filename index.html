@@ -25,6 +25,31 @@
         }
         .type-btn.active { background: #ff6b35; border-color: #ff6b35; }
 
+        /* 媒体上传样式 */
+        .media-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+        .upload-box {
+            width: 80px; height: 80px; border: 2px dashed #3a4756; border-radius: 8px;
+            background: #242f3d; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; cursor: pointer; color: #8e9ca8; font-size: 11px; text-align: center;
+        }
+        .upload-box:hover { border-color: #ff6b35; color: #ff6b35; }
+        .preview-item {
+            width: 80px; height: 80px; border-radius: 8px; position: relative; overflow: hidden;
+            border: 1px solid #3a4756; background: #000;
+        }
+        .preview-item img, .preview-item video { width: 100%; height: 100%; object-fit: cover; }
+        .preview-item .remove-btn {
+            position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
+            color: #ff5252; width: 20px; height: 20px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: bold; cursor: pointer; line-height: 1;
+        }
+
+        .buy-notice {
+            background: #242f3d; padding: 12px; border-radius: 8px; color: #ff9800;
+            font-size: 13px; margin-bottom: 16px; border-left: 4px solid #ff9800; display: none;
+        }
+
         .row { display: flex; gap: 10px; }
         .col { flex: 1; }
 
@@ -40,6 +65,7 @@
             border: none; border-radius: 8px; font-size: 16px; font-weight: bold;
             margin-top: 20px; cursor: pointer;
         }
+        .submit-btn:disabled { background-color: #555; cursor: not-allowed; }
         .sub-text { font-size: 11px; color: #7f8c8d; text-align: center; margin-top: 8px; }
     </style>
 </head>
@@ -49,20 +75,50 @@
     <div class="form-group">
         <label>类型</label>
         <div class="type-switch">
-            <div class="type-btn active" id="btnSell" onclick="selectType('出售', this)">出售</div>
-            <div class="type-btn" id="btnBuy" onclick="selectType('求购', this)">求购</div>
+            <div class="type-btn active" onclick="selectType('出售', this)">出售</div>
+            <div class="type-btn" onclick="selectType('求购', this)">求购</div>
         </div>
     </div>
 
+    <!-- 媒体选择区（出售显示，求购隐藏） -->
+    <div id="mediaContainer">
+        <div class="form-group">
+            <label>商品图片 (第一张为封面，最多9张)</label>
+            <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
+            <div class="media-grid" id="imagePreviewGrid">
+                <!-- 动态预览图片 -->
+            </div>
+            <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
+                <span style="font-size: 20px;">+</span>
+                <span>添加图片</span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>视频 (可选，1个)</label>
+            <input type="file" id="videoInput" accept="video/*" style="display:none;" onchange="handleVideoSelect(event)">
+            <div class="media-grid" id="videoPreviewContainer"></div>
+            <div class="upload-box" id="videoUploadBox" onclick="triggerVideoInput()" style="margin-top: 8px;">
+                <span style="font-size: 20px;">+</span>
+                <span>添加视频</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 求购专属提示 -->
+    <div class="buy-notice" id="buyNotice">
+        📌 求购信息将自动使用平台专属【求购】封面图统一发布。
+    </div>
+
     <div class="form-group">
-        <label id="titleLabel">标题 <span>*</span></label>
-        <input type="text" id="title" placeholder="例如：厨房用品 / 苹果17pm">
+        <label>标题 <span>*</span></label>
+        <input type="text" id="title" placeholder="例如：iPhone 15 Pro / 厨房用品">
     </div>
 
     <div class="row">
         <div class="col form-group">
             <label>价格 <span>*</span></label>
-            <input type="text" id="price" placeholder="如：私聊 / 1288 USD">
+            <input type="text" id="price" placeholder="如：私聊 / 680 美元">
         </div>
         <div class="col form-group">
             <label>城市 <span>*</span></label>
@@ -97,8 +153,8 @@
     <div class="form-group">
         <label>商品类别</label>
         <select id="category">
-            <option value="手机数码">手机数码</option>
             <option value="生活闲置">生活闲置</option>
+            <option value="手机数码">手机数码</option>
             <option value="电脑办公">电脑办公</option>
             <option value="汽车摩托">汽车摩托</option>
             <option value="房屋出租">房屋出租</option>
@@ -127,7 +183,7 @@
 
     <div class="form-group">
         <label>物品介绍</label>
-        <textarea id="desc" rows="4" placeholder="描述物品成色、需求细节、交易方式等..."></textarea>
+        <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
     </div>
 
     <button class="submit-btn" id="submitBtn">提交审核</button>
@@ -141,17 +197,118 @@
         const ADMIN_ID = "7446549590";
 
         let selectedType = '出售';
+        let selectedImages = [];
+        let selectedVideo = null;
+
         function selectType(type, el) {
             selectedType = type;
             document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
             el.classList.add('active');
+
+            const mediaContainer = document.getElementById('mediaContainer');
+            const buyNotice = document.getElementById('buyNotice');
+
+            if (type === '求购') {
+                mediaContainer.style.display = 'none';
+                buyNotice.style.display = 'block';
+            } else {
+                mediaContainer.style.display = 'block';
+                buyNotice.style.display = 'none';
+            }
         }
 
         function toggleTag(el) {
             el.classList.toggle('active');
         }
 
+        // 图片选择逻辑
+        function triggerImageInput() {
+            if (selectedImages.length >= 9) {
+                alert('最多上传 9 张图片');
+                return;
+            }
+            document.getElementById('imageInput').click();
+        }
+
+        function handleImageSelect(e) {
+            const files = Array.from(e.target.files);
+            for (let file of files) {
+                if (selectedImages.length >= 9) break;
+                selectedImages.push(file);
+            }
+            e.target.value = '';
+            renderImagePreviews();
+        }
+
+        function removeImage(index) {
+            selectedImages.splice(index, 1);
+            renderImagePreviews();
+        }
+
+        function renderImagePreviews() {
+            const container = document.getElementById('imagePreviewGrid');
+            container.innerHTML = '';
+            selectedImages.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                const removeBtn = document.createElement('div');
+                removeBtn.className = 'remove-btn';
+                removeBtn.innerText = '×';
+                removeBtn.onclick = (e) => { e.stopPropagation(); removeImage(index); };
+                div.appendChild(img);
+                div.appendChild(removeBtn);
+                container.appendChild(div);
+            });
+            document.getElementById('imageUploadBox').style.display = selectedImages.length >= 9 ? 'none' : 'flex';
+        }
+
+        // 视频选择逻辑
+        function triggerVideoInput() {
+            document.getElementById('videoInput').click();
+        }
+
+        function handleVideoSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                selectedVideo = file;
+                renderVideoPreview();
+            }
+            e.target.value = '';
+        }
+
+        function removeVideo() {
+            selectedVideo = null;
+            renderVideoPreview();
+        }
+
+        function renderVideoPreview() {
+            const container = document.getElementById('videoPreviewContainer');
+            container.innerHTML = '';
+            const uploadBox = document.getElementById('videoUploadBox');
+            if (selectedVideo) {
+                uploadBox.style.display = 'none';
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                const video = document.createElement('video');
+                video.src = URL.createObjectURL(selectedVideo);
+                const removeBtn = document.createElement('div');
+                removeBtn.className = 'remove-btn';
+                removeBtn.innerText = '×';
+                removeBtn.onclick = (e) => { e.stopPropagation(); removeVideo(); };
+                div.appendChild(video);
+                div.appendChild(removeBtn);
+                container.appendChild(div);
+            } else {
+                uploadBox.style.display = 'flex';
+            }
+        }
+
+        // 提交逻辑
         document.getElementById('submitBtn').addEventListener('click', async function() {
+            const submitBtn = document.getElementById('submitBtn');
+            
             const title = document.getElementById('title').value.trim();
             const price = document.getElementById('price').value.trim();
             const city = document.getElementById('city').value;
@@ -173,30 +330,93 @@
                 return;
             }
 
-            const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
-            const addressStr = address ? ` ${address}` : '';
-            const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
-
-            // 生成格式
-            const formattedContent = 
-                `${itemLabel}：${title}\n` +
-                `价        格：${price}\n` +
-                `商品类别：#${category}\n` +
-                `位        置：#${city}${addressStr}\n` +
-                `联系方式：${contact}\n` +
-                `交易方式：自取/送货上门\n` +
-                `物品介绍：${desc || '无'}${tagStr}`;
-
-            const adminText = 
-                `🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
-                `${formattedContent}\n\n` +
-                `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
-
-            const userText = 
-                `✅ <b>投稿提交成功！</b>\n\n` +
-                `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
+            submitBtn.innerText = "正在提交，请稍候...";
+            submitBtn.disabled = true;
 
             try {
+                let mediaType = 'none';
+                let mediaFileIds = [];
+
+                if (selectedType === '出售') {
+                    if (selectedImages.length === 1) {
+                        submitBtn.innerText = "正在上传图片...";
+                        const formData = new FormData();
+                        formData.append('chat_id', ADMIN_ID);
+                        formData.append('photo', selectedImages[0]);
+
+                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                            method: 'POST', body: formData
+                        }).then(r => r.json());
+
+                        if (res.ok) {
+                            mediaType = 'photo';
+                            mediaFileIds.push(res.result.photo.pop().file_id);
+                        }
+                    } else if (selectedImages.length > 1) {
+                        submitBtn.innerText = `正在上传 ${selectedImages.length} 张图片...`;
+                        const formData = new FormData();
+                        formData.append('chat_id', ADMIN_ID);
+
+                        const mediaArray = selectedImages.map((img, i) => {
+                            formData.append(`file${i}`, img);
+                            return { type: 'photo', media: `attach://file${i}` };
+                        });
+                        formData.append('media', JSON.stringify(mediaArray));
+
+                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, {
+                            method: 'POST', body: formData
+                        }).then(r => r.json());
+
+                        if (res.ok) {
+                            mediaType = 'photos';
+                            res.result.forEach(msg => mediaFileIds.push(msg.photo.pop().file_id));
+                        }
+                    } else if (selectedVideo) {
+                        submitBtn.innerText = "正在上传视频...";
+                        const formData = new FormData();
+                        formData.append('chat_id', ADMIN_ID);
+                        formData.append('video', selectedVideo);
+
+                        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, {
+                            method: 'POST', body: formData
+                        }).then(r => r.json());
+
+                        if (res.ok) {
+                            mediaType = 'video';
+                            mediaFileIds.push(res.result.video.file_id);
+                        }
+                    }
+                } else if (selectedType === '求购') {
+                    mediaType = 'buy';
+                }
+
+                let hiddenMediaTag = '';
+                if (mediaType !== 'none') {
+                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}&ids=${mediaFileIds.join(',')}">&#8203;</a>`;
+                }
+
+                const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
+                const addressStr = address ? ` ${address}` : '';
+                const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
+
+                const formattedContent = 
+                    `${itemLabel}：${title}\n` +
+                    `价        格：${price}\n` +
+                    `商品类别：#${category}\n` +
+                    `位        置：#${city}${addressStr}\n` +
+                    `联系方式：${contact}\n` +
+                    `交易方式：自取/送货上门\n` +
+                    `物品介绍：${desc || '无'}${tagStr}`;
+
+                const adminText = 
+                    `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
+                    `${formattedContent}\n\n` +
+                    `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
+
+                const userText = 
+                    `✅ <b>投稿提交成功！</b>\n\n` +
+                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
+
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -223,7 +443,9 @@
 
                 tg.close();
             } catch (err) {
-                alert('提交失败，请重试');
+                alert('提交失败，请检查网络重试');
+                submitBtn.innerText = "提交审核";
+                submitBtn.disabled = false;
             }
         });
     </script>
