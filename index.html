@@ -434,7 +434,7 @@
 
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                 const addressStr = address ? ` ${address}` : '';
-                const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
+                const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
 
                 const formattedContent = 
                     `${itemLabel}：${title}\n` +
