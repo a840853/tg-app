@@ -117,21 +117,7 @@
     <div class="row">
         <div class="col form-group">
             <label>价格 <span>*</span></label>
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="price" placeholder="如 68" style="flex:1.3;">
-                <select id="priceUnit" style="flex:1;">
-                    <option value="">不写单位</option>
-                    <option value="美金 USD">美金 USD</option>
-                    <option value="迪拉姆 AED">迪拉姆 AED</option>
-                    <option value="USDT">USDT</option>
-                    <option value="瑞尔 KHR">瑞尔 KHR</option>
-                    <option value="卢比 LKR">卢比 LKR</option>
-                    <option value="人民币">人民币</option>
-                    <option value="泰铢 THB">泰铢 THB</option>
-                    <option value="缅币 MMK">缅币 MMK</option>
-                    <option value="越南盾 VND">越南盾 VND</option>
-                </select>
-            </div>
+            <input type="text" id="price" placeholder="如：私聊 / 680 美元">
         </div>
         <div class="col form-group">
             <label>城市 <span>*</span></label>
@@ -234,19 +220,6 @@
             el.classList.toggle('active');
         }
 
-        // 从聊天里点击"出售物品"/"求购物品"按钮打开小程序时，会带上 ?type=sell 或 ?type=buy，
-        // 这里根据这个参数自动预选对应的标签，省得用户还要再点一次
-        (function initTypeFromQuery() {
-            const params = new URLSearchParams(window.location.search);
-            const t = params.get('type');
-            const typeBtns = document.querySelectorAll('.type-btn');
-            if (t === 'buy' && typeBtns[1]) {
-                selectType('求购', typeBtns[1]);
-            } else if (t === 'sell' && typeBtns[0]) {
-                selectType('出售', typeBtns[0]);
-            }
-        })();
-
         function triggerImageInput() {
             if (selectedImages.length >= 9) {
                 alert('最多上传 9 张图片');
@@ -324,7 +297,7 @@
                 uploadBox.style.display = 'none';
                 const div = document.createElement('div');
                 div.className = 'preview-item';
-
+                
                 const video = document.createElement('video');
                 video.src = URL.createObjectURL(selectedVideo);
                 video.setAttribute('playsinline', '');
@@ -340,7 +313,7 @@
                 removeBtn.className = 'remove-btn';
                 removeBtn.innerText = '×';
                 removeBtn.onclick = (e) => { e.stopPropagation(); removeVideo(); };
-
+                
                 div.appendChild(video);
                 div.appendChild(badge);
                 div.appendChild(removeBtn);
@@ -350,64 +323,11 @@
             }
         }
 
-        // 抓取视频第一帧作为封面图，并读取宽高/时长一并传给 Telegram，
-        // 这样封面和点开播放后看到的画面是同一帧，衔接更顺滑，也避免全黑封面的问题
-        function captureVideoThumbnail(file) {
-            return new Promise((resolve) => {
-                const video = document.createElement('video');
-                video.preload = 'metadata';
-                video.muted = true;
-                video.playsInline = true;
-                video.src = URL.createObjectURL(file);
-
-                const cleanupAndResolve = (result) => {
-                    URL.revokeObjectURL(video.src);
-                    resolve(result);
-                };
-
-                video.onloadeddata = () => {
-                    // 部分浏览器/编码在 0 秒解码不出画面，用一个极小偏移保证能取到帧
-                    video.currentTime = 0.01;
-                };
-
-                video.onseeked = () => {
-                    try {
-                        const maxSize = 320;
-                        let w = video.videoWidth;
-                        let h = video.videoHeight;
-                        if (!w || !h) { cleanupAndResolve(null); return; }
-                        if (w > h) {
-                            if (w > maxSize) { h = Math.round(h * maxSize / w); w = maxSize; }
-                        } else {
-                            if (h > maxSize) { w = Math.round(w * maxSize / h); h = maxSize; }
-                        }
-                        const canvas = document.createElement('canvas');
-                        canvas.width = w;
-                        canvas.height = h;
-                        canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-                        canvas.toBlob((blob) => {
-                            cleanupAndResolve({
-                                blob,
-                                width: video.videoWidth,
-                                height: video.videoHeight,
-                                duration: Math.round(video.duration || 0)
-                            });
-                        }, 'image/jpeg', 0.8);
-                    } catch (err) {
-                        cleanupAndResolve(null);
-                    }
-                };
-
-                video.onerror = () => cleanupAndResolve(null);
-            });
-        }
-
         document.getElementById('submitBtn').addEventListener('click', async function() {
             const submitBtn = document.getElementById('submitBtn');
             
             const title = document.getElementById('title').value.trim();
             const price = document.getElementById('price').value.trim();
-            const priceUnit = document.getElementById('priceUnit').value;
             const city = document.getElementById('city').value;
             const address = document.getElementById('address').value.trim();
             const contact = document.getElementById('contact').value.trim();
@@ -441,13 +361,6 @@
                         allFiles.push({ type: 'video', file: selectedVideo });
                     }
 
-                    if (allFiles.length > 10) {
-                        alert('图片 + 视频总数最多 10 个（Telegram 相册上限），请删减后再提交');
-                        submitBtn.innerText = "提交审核";
-                        submitBtn.disabled = false;
-                        return;
-                    }
-
                     if (allFiles.length === 1) {
                         const item = allFiles[0];
                         const formData = new FormData();
@@ -467,17 +380,8 @@
                                 return;
                             }
                         } else {
-                            submitBtn.innerText = "正在处理视频封面...";
-                            const thumbInfo = await captureVideoThumbnail(item.file);
-                            formData.append('video', item.file);
-                            formData.append('supports_streaming', 'true');
-                            if (thumbInfo && thumbInfo.blob) {
-                                formData.append('thumbnail', thumbInfo.blob, 'thumb.jpg');
-                                formData.append('width', thumbInfo.width);
-                                formData.append('height', thumbInfo.height);
-                                formData.append('duration', thumbInfo.duration);
-                            }
                             submitBtn.innerText = "正在上传视频...";
+                            formData.append('video', item.file);
                             const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: formData }).then(r => r.json());
                             if (res.ok) {
                                 mediaType = 'video';
@@ -490,32 +394,16 @@
                             }
                         }
                     } else if (allFiles.length > 1) {
-                        submitBtn.innerText = `正在处理 ${allFiles.length} 个媒体文件...`;
+                        submitBtn.innerText = `正在上传 ${allFiles.length} 个媒体文件...`;
                         const formData = new FormData();
                         formData.append('chat_id', ADMIN_ID);
 
-                        const mediaArray = [];
-                        for (let i = 0; i < allFiles.length; i++) {
-                            const item = allFiles[i];
+                        const mediaArray = allFiles.map((item, i) => {
                             formData.append(`file${i}`, item.file);
-                            const mediaItem = { type: item.type, media: `attach://file${i}` };
-
-                            if (item.type === 'video') {
-                                const thumbInfo = await captureVideoThumbnail(item.file);
-                                if (thumbInfo && thumbInfo.blob) {
-                                    formData.append(`thumb${i}`, thumbInfo.blob, `thumb${i}.jpg`);
-                                    mediaItem.thumbnail = `attach://thumb${i}`;
-                                    mediaItem.width = thumbInfo.width;
-                                    mediaItem.height = thumbInfo.height;
-                                    mediaItem.duration = thumbInfo.duration;
-                                }
-                                mediaItem.supports_streaming = true;
-                            }
-                            mediaArray.push(mediaItem);
-                        }
+                            return { type: item.type, media: `attach://file${i}` };
+                        });
                         formData.append('media', JSON.stringify(mediaArray));
 
-                        submitBtn.innerText = `正在上传 ${allFiles.length} 个媒体文件...`;
                         const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, { method: 'POST', body: formData }).then(r => r.json());
 
                         if (res.ok) {
@@ -533,9 +421,6 @@
                             submitBtn.disabled = false;
                             return;
                         }
-                    } else {
-                        // 出售但未上传任何图片/视频，使用平台预设的出售默认图
-                        mediaType = 'sell_default';
                     }
                 } else if (selectedType === '求购') {
                     mediaType = 'buy';
@@ -549,12 +434,11 @@
 
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                 const addressStr = address ? ` ${address}` : '';
-                const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
-                const priceStr = priceUnit ? `${price} ${priceUnit}` : price;
+                const tagStr = tags.length > 0 ? `\n成色标签：${tags.join('、')}` : '';
 
                 const formattedContent = 
                     `${itemLabel}：${title}\n` +
-                    `价        格：${priceStr}\n` +
+                    `价        格：${price}\n` +
                     `商品类别：#${category}\n` +
                     `位        置：#${city}${addressStr}\n` +
                     `联系方式：${contact}\n` +
@@ -588,9 +472,6 @@
                                 [
                                     { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
                                     { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
-                                ],
-                                [
-                                    { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
                                 ]
                             ]
                         }
