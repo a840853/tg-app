@@ -420,12 +420,6 @@
                 return;
             }
 
-            const userId = tg.initDataUnsafe?.user?.id;
-            const userName = tg.initDataUnsafe?.user?.first_name || '用户';
-            if (!userId) {
-                alert('请在 Telegram 客户端内打开小程序！');
-                return;
-            }
 
             submitBtn.innerText = "正在准备提交...";
             submitBtn.disabled = true;
@@ -541,12 +535,6 @@
                     mediaType = 'buy';
                 }
 
-                let hiddenMediaTag = '';
-                if (mediaType !== 'none') {
-                    const idsParam = mediaItems.length > 0 ? `&ids=${mediaItems.join(',')}` : '';
-                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}${idsParam}">&#8203;</a>`;
-                }
-
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                 const addressStr = address ? ` ${address}` : '';
                 const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
@@ -561,43 +549,15 @@
                     `交易方式：自取/送货上门\n` +
                     `物品介绍：${desc || '无'}${tagStr}`;
 
-                const adminText = 
-                    `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
-                    `${formattedContent}\n\n` +
-                    `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
-
-                const userText = 
-                    `✅ <b>投稿提交成功！</b>\n\n` +
-                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
-
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
-                });
-
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: ADMIN_ID,
-                        text: adminText,
-                        parse_mode: 'HTML',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
-                                    { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
-                                ],
-                                [
-                                    { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
-                                ]
-                            ]
-                        }
-                    })
-                });
-
-                tg.close();
+                // 不再由小程序自己发消息给用户/管理员（因为键盘按钮小程序本来就拿不到真实身份）。
+                // 改成把内容通过 sendData 发回机器人，机器人后端会拿到 Telegram 提供的真实发送者身份，
+                // 由后端统一发送"提交成功"提示给用户、发送审核消息给管理员。
+                tg.sendData(JSON.stringify({
+                    selectedType,
+                    mediaType,
+                    mediaItems,
+                    formattedContent
+                }));
             } catch (err) {
                 alert('提交失败，请检查网络或更换视频重试');
                 submitBtn.innerText = "提交审核";
