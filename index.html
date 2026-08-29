@@ -337,6 +337,8 @@
             }
         }
 
+        // 抓取视频第一帧作为封面图，并读取宽高/时长一并传给 Telegram，
+        // 这样封面和点开播放后看到的画面是同一帧，衔接更顺滑，也避免全黑封面的问题
         function captureVideoThumbnail(file) {
             return new Promise((resolve) => {
                 const video = document.createElement('video');
@@ -351,6 +353,7 @@
                 };
 
                 video.onloadeddata = () => {
+                    // 部分浏览器/编码在 0 秒解码不出画面，用一个极小偏移保证能取到帧
                     video.currentTime = 0.01;
                 };
 
@@ -518,6 +521,7 @@
                             return;
                         }
                     } else {
+                        // 出售但未上传任何图片/视频，使用平台预设的出售默认图
                         mediaType = 'sell_default';
                     }
                 } else if (selectedType === '求购') {
@@ -568,12 +572,10 @@
                         parse_mode: 'HTML',
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` }],
                                 [
-                                    { text: "❌ 直接拒绝", callback_data: `reject_direct|${userId}` },
-                                    { text: "📝 拒绝并附带说明", callback_data: `reject_reason|${userId}` }
-                                ],
-                                [{ text: "🚫 拉黑该用户", callback_data: `ban|${userId}` }]
+                                    { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
+                                    { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
+                                ]
                             ]
                         }
                     })
