@@ -5,52 +5,189 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>发布商品</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: #17212b; color: #ffffff; padding: 16px; margin: 0; font-size: 14px; }
-        h2 { text-align: center; margin-top: 0; margin-bottom: 20px; font-size: 18px; }
-        .form-group { margin-bottom: 16px; }
-        label { display: block; margin-bottom: 6px; color: #8e9ca8; font-size: 13px; font-weight: 500; }
-        label span { color: #ff5252; }
-        input, select, textarea {
-            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #242f3d;
-            background-color: #242f3d; color: #fff; font-size: 14px; outline: none;
-        }
-        input:focus, select:focus, textarea:focus { border-color: #ff6b35; }
-        
-        .type-switch { display: flex; gap: 10px; }
-        .type-btn {
-            flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #242f3d;
-            background: #242f3d; color: #fff; text-align: center; cursor: pointer; font-weight: bold;
-        }
-        .type-btn.active { background: #ff6b35; border-color: #ff6b35; }
+        :root {
+            --bg: #0a0e1a;
+            --panel: #131a2c;
+            --panel-2: #182140;
+            --field: #10182b;
+            --field-border: #232d4a;
+            --border-soft: #1c2440;
 
+            --coral: #ff6b4a;
+            --amber: #ffb347;
+            --brand: linear-gradient(120deg, var(--coral), var(--amber));
+            --brand-flat: #ff7a52;
+
+            --teal: #22d3c7;
+            --teal-dim: rgba(34, 211, 199, 0.14);
+
+            --text: #f5f7fc;
+            --text-muted: #8891ab;
+            --text-faint: #4d5677;
+            --danger: #ff4d6d;
+            --radius: 16px;
+        }
+
+        * { box-sizing: border-box; font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; }
+
+        body {
+            background: var(--bg);
+            background-image:
+                radial-gradient(60% 40% at 15% 0%, rgba(255, 107, 74, 0.16), transparent 60%),
+                radial-gradient(50% 35% at 100% 8%, rgba(34, 211, 199, 0.12), transparent 60%);
+            background-attachment: fixed;
+            color: var(--text);
+            padding: 0 16px 34px;
+            margin: 0;
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ---------- Hero banner ---------- */
+        .hero {
+            margin: 16px 0 18px;
+            padding: 26px 20px 24px;
+            border-radius: 22px;
+            background: linear-gradient(135deg, #1a1030 0%, #2a1230 45%, #3a1420 100%);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 20px 40px -18px rgba(255, 107, 74, 0.35);
+        }
+        .hero::before {
+            content: "";
+            position: absolute; inset: -40% -20% auto auto;
+            width: 220px; height: 220px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,179,71,0.35), transparent 70%);
+        }
+        .hero::after {
+            content: "";
+            position: absolute; left: -15%; bottom: -45%;
+            width: 200px; height: 200px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(34,211,199,0.22), transparent 70%);
+        }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+            color: var(--amber); background: rgba(255, 179, 71, 0.12);
+            border: 1px solid rgba(255, 179, 71, 0.3);
+            padding: 5px 11px; border-radius: 100px;
+            position: relative; z-index: 1;
+        }
+        .hero h1 {
+            font-size: 27px; font-weight: 800; letter-spacing: -0.01em;
+            margin: 14px 0 6px; position: relative; z-index: 1;
+        }
+        .hero p {
+            margin: 0; font-size: 13px; color: rgba(245, 247, 252, 0.65);
+            position: relative; z-index: 1;
+        }
+
+        /* ---------- Cards ---------- */
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius);
+            padding: 18px 16px 16px;
+            margin-bottom: 12px;
+            position: relative;
+        }
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 14px;
+            font-weight: 800;
+            color: var(--text);
+            margin: 0 0 14px;
+        }
+        .card-title .badge-icon {
+            width: 26px; height: 26px; border-radius: 9px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; flex-shrink: 0;
+            background: var(--brand);
+            box-shadow: 0 4px 12px -4px rgba(255, 107, 74, 0.7);
+        }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group:last-child { margin-bottom: 0; }
+        label { display: block; margin-bottom: 7px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
+        label span { color: var(--danger); margin-left: 2px; }
+
+        input, select, textarea {
+            width: 100%; padding: 12px 13px; border-radius: 11px; border: 1.5px solid var(--field-border);
+            background-color: var(--field); color: var(--text); font-size: 14px; outline: none;
+            font-family: inherit;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        input::placeholder, textarea::placeholder { color: var(--text-faint); }
+        input:hover, select:hover, textarea:hover { border-color: #364066; }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--brand-flat);
+            box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.16);
+        }
+        select { appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23ff9466' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 14px center; padding-right: 34px;
+        }
+        textarea { resize: vertical; min-height: 84px; line-height: 1.55; }
+
+        /* ---------- Type switch (出售 / 求购) ---------- */
+        .type-switch {
+            display: flex; gap: 5px; padding: 5px;
+            background: var(--field); border: 1.5px solid var(--field-border); border-radius: 14px;
+        }
+        .type-btn {
+            flex: 1; padding: 11px; border-radius: 10px; border: none;
+            background: transparent; color: var(--text-muted); text-align: center; cursor: pointer;
+            font-weight: 700; font-size: 14px;
+            transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+        }
+        .type-btn:hover:not(.active) { background: rgba(255, 255, 255, 0.06); color: var(--text); }
+        .type-btn.active {
+            background: var(--brand);
+            color: #1a0e08;
+            box-shadow: 0 8px 18px -8px rgba(255, 107, 74, 0.7);
+        }
+        .type-btn.active:hover { box-shadow: 0 10px 22px -6px rgba(255, 107, 74, 0.85); filter: brightness(1.05); }
+
+        /* ---------- Media upload ---------- */
         .media-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
         .upload-box {
-            width: 80px; height: 80px; border: 2px dashed #3a4756; border-radius: 8px;
-            background: #242f3d; display: flex; flex-direction: column; align-items: center;
-            justify-content: center; cursor: pointer; color: #8e9ca8; font-size: 11px; text-align: center;
+            width: 80px; height: 80px; border: 1.5px dashed var(--field-border); border-radius: 13px;
+            background: var(--field); display: flex; flex-direction: column; align-items: center;
+            justify-content: center; cursor: pointer; color: var(--text-muted); font-size: 11px; text-align: center;
+            gap: 3px; transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.15s ease;
         }
-        .upload-box:hover { border-color: #ff6b35; color: #ff6b35; }
+        .upload-box:hover { border-color: var(--brand-flat); color: var(--amber); background: rgba(255, 107, 74, 0.06); transform: translateY(-1px); }
+        .upload-box:active { border-color: var(--brand-flat); color: var(--amber); transform: translateY(0); }
+        .upload-box span:first-child { font-size: 20px; color: var(--coral); font-weight: 700; }
         .preview-item {
-            width: 80px; height: 80px; border-radius: 8px; position: relative; overflow: hidden;
-            border: 1px solid #3a4756; background: #000;
+            width: 80px; height: 80px; border-radius: 13px; position: relative; overflow: hidden;
+            border: 1px solid var(--field-border); background: #000;
         }
         .preview-item img, .preview-item video { width: 100%; height: 100%; object-fit: cover; }
         .preview-item .remove-btn {
-            position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
-            color: #ff5252; width: 20px; height: 20px; border-radius: 50%;
+            position: absolute; top: 4px; right: 4px; background: rgba(10, 10, 16, 0.8);
+            color: var(--amber); width: 20px; height: 20px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
             font-size: 14px; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;
+            transition: background 0.15s ease, transform 0.15s ease;
         }
+        .preview-item .remove-btn:hover { background: var(--danger); color: #fff; transform: scale(1.1); }
         .video-badge {
-            position: absolute; bottom: 2px; left: 2px; background: rgba(0,0,0,0.6);
-            color: #fff; font-size: 10px; padding: 2px 4px; border-radius: 3px; z-index: 5;
+            position: absolute; bottom: 4px; left: 4px; background: rgba(10, 10, 16, 0.8);
+            color: var(--teal); font-size: 10px; padding: 2px 6px; border-radius: 20px; z-index: 5; font-weight: 700;
         }
 
         .buy-notice {
-            background: #242f3d; padding: 12px; border-radius: 8px; color: #ff9800;
-            font-size: 13px; margin-bottom: 16px; border-left: 4px solid #ff9800; display: none;
+            background: var(--panel);
+            border: 1.5px solid rgba(34, 211, 199, 0.3); border-left: 4px solid var(--teal);
+            padding: 13px 14px; border-radius: var(--radius); color: #8ff2ea;
+            font-size: 13px; line-height: 1.5; margin-bottom: 12px; display: none; font-weight: 600;
         }
 
         .row { display: flex; gap: 10px; }
@@ -58,48 +195,75 @@
 
         .tags-container { display: flex; flex-wrap: wrap; gap: 8px; }
         .tag-btn {
-            padding: 8px 14px; border-radius: 6px; background: #242f3d; color: #fff;
-            font-size: 13px; cursor: pointer; border: 1px solid transparent; user-select: none;
+            padding: 8px 15px; border-radius: 100px; background: var(--field); color: var(--text-muted);
+            font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1.5px solid var(--field-border); user-select: none;
+            transition: all 0.15s ease;
         }
-        .tag-btn.active { background: #3a4756; border-color: #ff6b35; color: #ff6b35; }
+        .tag-btn:hover:not(.active) { border-color: var(--text-faint); color: var(--text); background: rgba(255, 255, 255, 0.04); }
+        .tag-btn.active { background: var(--teal-dim); border-color: var(--teal); color: var(--teal); }
+        .tag-btn.active:hover { box-shadow: 0 0 0 3px var(--teal-dim); }
+        .tag-btn:active { transform: scale(0.95); }
 
+        #deliveryTags .tag-btn.active { background: rgba(255, 107, 74, 0.14); border-color: var(--brand-flat); color: var(--amber); }
+        #deliveryTags .tag-btn.active:hover { box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.14); }
+
+        /* ---------- Submit ---------- */
         .submit-btn {
-            width: 100%; padding: 14px; background-color: #ff6b35; color: white;
-            border: none; border-radius: 8px; font-size: 16px; font-weight: bold;
-            margin-top: 20px; cursor: pointer;
+            width: 100%; padding: 16px; background: var(--brand);
+            color: #1a0e08; border: none; border-radius: 14px; font-size: 16px; font-weight: 800;
+            margin-top: 8px; cursor: pointer; position: relative; overflow: hidden;
+            box-shadow: 0 16px 32px -14px rgba(255, 107, 74, 0.75);
+            transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
         }
-        .submit-btn:disabled { background-color: #555; cursor: not-allowed; }
-        .sub-text { font-size: 11px; color: #7f8c8d; text-align: center; margin-top: 8px; }
+        .submit-btn::after {
+            content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+            background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+            transform: skewX(-20deg);
+            transition: left 0.55s ease;
+        }
+        .submit-btn:hover:not(:disabled) {
+            filter: brightness(1.06);
+            box-shadow: 0 18px 36px -12px rgba(255, 107, 74, 0.9);
+            transform: translateY(-1px);
+        }
+        .submit-btn:hover:not(:disabled)::after { left: 130%; }
+        .submit-btn:active { transform: translateY(1px) scale(0.995); box-shadow: 0 8px 18px -10px rgba(255, 107, 74, 0.7); }
+        .submit-btn:disabled { background: #2a3050; color: var(--text-faint); box-shadow: none; cursor: not-allowed; }
+        .sub-text { font-size: 11.5px; color: var(--text-faint); text-align: center; margin-top: 10px; line-height: 1.5; }
     </style>
 </head>
 <body>
-    <h2>发布商品</h2>
-    
-    <div class="form-group">
-        <label>类型</label>
+    <div class="hero">
+        <span class="hero-badge">✦ CURATED MARKET</span>
+        <h1>发布商品</h1>
+        <p>填好信息一键提交，审核通过自动发布到频道</p>
+    </div>
+
+    <div class="card">
         <div class="type-switch">
-            <div class="type-btn active" onclick="selectType('出售', this)">出售</div>
-            <div class="type-btn" onclick="selectType('求购', this)">求购</div>
+            <div class="type-btn active" onclick="selectType('出售', this)">📦 出售</div>
+            <div class="type-btn" onclick="selectType('求购', this)">🛒 求购</div>
         </div>
     </div>
 
-    <div id="mediaContainer">
+    <div class="card" id="mediaContainer">
+        <div class="card-title"><span class="badge-icon">📷</span>商品图片与视频</div>
         <div class="form-group">
-            <label>商品图片 (第一张为封面，最多9张)</label>
+            <label>商品图片（第一张为封面，最多9张）</label>
             <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
             <div class="media-grid" id="imagePreviewGrid"></div>
             <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
-                <span style="font-size: 20px;">+</span>
+                <span>+</span>
                 <span>添加图片</span>
             </div>
         </div>
 
         <div class="form-group">
-            <label>视频 (可选，1个，限制50MB以内)</label>
+            <label>视频（可选，1个，限制50MB以内）</label>
             <input type="file" id="videoInput" accept="video/mp4,video/mov,video/quicktime,video/*" style="display:none;" onchange="handleVideoSelect(event)">
             <div class="media-grid" id="videoPreviewContainer"></div>
             <div class="upload-box" id="videoUploadBox" onclick="triggerVideoInput()" style="margin-top: 8px;">
-                <span style="font-size: 20px;">+</span>
+                <span>+</span>
                 <span>添加视频</span>
             </div>
         </div>
@@ -109,110 +273,129 @@
         📌 求购信息将自动使用平台专属【求购】封面图统一发布。
     </div>
 
-    <div class="form-group">
-        <label>标题 <span>*</span></label>
-        <input type="text" id="title" placeholder="例如：iPhone 15 Pro / 厨房用品">
-    </div>
+    <div class="card">
+        <div class="card-title"><span class="badge-icon">📝</span>基本信息</div>
+        <div class="form-group">
+            <label>标题 <span>*</span></label>
+            <input type="text" id="title" placeholder="例如：iPhone 15 Pro / 厨房用品">
+        </div>
 
-    <div class="row">
-        <div class="col form-group">
-            <label>价格 <span>*</span></label>
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="price" placeholder="如 68" style="flex:1.3;">
-                <select id="priceUnit" style="flex:1;">
-                    <option value="">不写单位</option>
-                    <option value="美金 USD">美金 USD</option>
-                    <option value="迪拉姆 AED">迪拉姆 AED</option>
-                    <option value="USDT">USDT</option>
-                    <option value="瑞尔 KHR">瑞尔 KHR</option>
-                    <option value="卢比 LKR">卢比 LKR</option>
-                    <option value="人民币">人民币</option>
-                    <option value="泰铢 THB">泰铢 THB</option>
-                    <option value="缅币 MMK">缅币 MMK</option>
-                    <option value="越南盾 VND">越南盾 VND</option>
+        <div class="row">
+            <div class="col form-group">
+                <label>价格 <span>*</span></label>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="price" placeholder="如 68" style="flex:1.3;">
+                    <select id="priceUnit" style="flex:1;">
+                        <option value="">不写单位</option>
+                        <option value="美金 USD">美金 USD</option>
+                        <option value="迪拉姆 AED">迪拉姆 AED</option>
+                        <option value="USDT">USDT</option>
+                        <option value="瑞尔 KHR">瑞尔 KHR</option>
+                        <option value="卢比 LKR">卢比 LKR</option>
+                        <option value="人民币">人民币</option>
+                        <option value="泰铢 THB">泰铢 THB</option>
+                        <option value="缅币 MMK">缅币 MMK</option>
+                        <option value="越南盾 VND">越南盾 VND</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col form-group">
+                <label>城市 <span>*</span></label>
+                <select id="city">
+                    <option value="西港">西港</option>
+                    <option value="金边">金边</option>
+                    <option value="波贝">波贝</option>
+                    <option value="木牌">木牌</option>
+                    <option value="戈公">戈公</option>
+                    <option value="拜林">拜林</option>
+                    <option value="菩萨">菩萨</option>
+                    <option value="财通">财通</option>
+                    <option value="磅湛">磅湛</option>
+                    <option value="暹粒">暹粒</option>
+                    <option value="贡布">贡布</option>
+                    <option value="白马">白马</option>
+                    <option value="其他">其他</option>
                 </select>
             </div>
         </div>
-        <div class="col form-group">
-            <label>城市 <span>*</span></label>
-            <select id="city">
-                <option value="西港">西港</option>
-                <option value="金边">金边</option>
-                <option value="波贝">波贝</option>
-                <option value="木牌">木牌</option>
-                <option value="戈公">戈公</option>
-                <option value="拜林">拜林</option>
-                <option value="菩萨">菩萨</option>
-                <option value="财通">财通</option>
-                <option value="磅湛">磅湛</option>
-                <option value="暹粒">暹粒</option>
-                <option value="贡布">贡布</option>
-                <option value="白马">白马</option>
+
+        <div class="form-group">
+            <label>详细地址（可不填）</label>
+            <input type="text" id="address" placeholder="如 万达 / 街道 / 小区">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><span class="badge-icon">☎️</span>联系与交易</div>
+        <div class="form-group">
+            <label>联系方式 <span>*</span></label>
+            <input type="text" id="contact" placeholder="@你的用户名 或 电话">
+        </div>
+
+        <div class="form-group">
+            <label>交易方式 <span>*</span></label>
+            <div class="tags-container" id="deliveryTags">
+                <div class="tag-btn active" onclick="toggleDelivery(this)">自取</div>
+                <div class="tag-btn active" onclick="toggleDelivery(this)">送货上门</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><span class="badge-icon">🏷️</span>分类与标签</div>
+        <div class="form-group">
+            <label>商品类别 <span>*</span></label>
+            <select id="category">
+                <option value="" selected disabled>请选择商品类别</option>
+                <option value="生活闲置">生活闲置</option>
+                <option value="手机数码">手机数码</option>
+                <option value="电脑办公">电脑办公</option>
+                <option value="汽车摩托">汽车摩托</option>
+                <option value="房屋出租">房屋出租</option>
+                <option value="家具家电">家具家电</option>
+                <option value="音响乐器">音响乐器</option>
+                <option value="服饰鞋包">服饰鞋包</option>
+                <option value="渔具户外">渔具户外</option>
                 <option value="其他">其他</option>
             </select>
         </div>
-    </div>
 
-    <div class="form-group">
-        <label>详细地址 (可不填)</label>
-        <input type="text" id="address" placeholder="如 万达 / 街道 / 小区">
-    </div>
-
-    <div class="form-group">
-        <label>联系方式 <span>*</span></label>
-        <input type="text" id="contact" placeholder="@你的用户名 或 电话">
-    </div>
-
-    <div class="form-group">
-        <label>交易方式 <span>*</span></label>
-        <div class="tags-container" id="deliveryTags">
-            <div class="tag-btn active" onclick="toggleDelivery(this)">自取</div>
-            <div class="tag-btn active" onclick="toggleDelivery(this)">送货上门</div>
+        <div class="form-group">
+            <label>成色 / 标签</label>
+            <div class="tags-container">
+                <div class="tag-btn" onclick="toggleTag(this)">全新</div>
+                <div class="tag-btn" onclick="toggleTag(this)">99新</div>
+                <div class="tag-btn" onclick="toggleTag(this)">95新</div>
+                <div class="tag-btn" onclick="toggleTag(this)">9成新</div>
+                <div class="tag-btn" onclick="toggleTag(this)">8成新</div>
+                <div class="tag-btn" onclick="toggleTag(this)">急出</div>
+                <div class="tag-btn" onclick="toggleTag(this)">可小刀</div>
+                <div class="tag-btn" onclick="toggleTag(this)">带包装</div>
+                <div class="tag-btn" onclick="toggleTag(this)">带票</div>
+            </div>
         </div>
     </div>
 
-    <div class="form-group">
-        <label>商品类别 <span>*</span></label>
-        <select id="category">
-            <option value="" selected disabled>请选择商品类别</option>
-            <option value="生活闲置">生活闲置</option>
-            <option value="手机数码">手机数码</option>
-            <option value="电脑办公">电脑办公</option>
-            <option value="汽车摩托">汽车摩托</option>
-            <option value="房屋出租">房屋出租</option>
-            <option value="家具家电">家具家电</option>
-            <option value="音响乐器">音响乐器</option>
-            <option value="服饰鞋包">服饰鞋包</option>
-            <option value="渔具户外">渔具户外</option>
-            <option value="其他">其他</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label>成色 / 标签</label>
-        <div class="tags-container">
-            <div class="tag-btn" onclick="toggleTag(this)">全新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">99新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">95新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">9成新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">8成新</div>
-            <div class="tag-btn" onclick="toggleTag(this)">急出</div>
-            <div class="tag-btn" onclick="toggleTag(this)">可小刀</div>
-            <div class="tag-btn" onclick="toggleTag(this)">带包装</div>
-            <div class="tag-btn" onclick="toggleTag(this)">带票</div>
+    <div class="card">
+        <div class="card-title"><span class="badge-icon">💬</span>物品介绍</div>
+        <div class="form-group">
+            <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
         </div>
-    </div>
-
-    <div class="form-group">
-        <label>物品介绍</label>
-        <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
     </div>
 
     <button class="submit-btn" id="submitBtn">提交审核</button>
     <div class="sub-text">提交后将由管理员审核，审核通过后自动同步发布至频道。</div>
 
     <script>
-        const tg = window.Telegram.WebApp;
+        // 如果不是在 Telegram 客户端里打开（比如直接用普通浏览器预览），
+        // window.Telegram.WebApp 不存在，这里给一个兜底的假对象，避免脚本直接崩溃，
+        // 方便预览排版和交互效果；真正的提交功能仍然只能在 Telegram 内使用。
+        const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
+            expand() {},
+            showAlert(msg) { alert(msg); },
+            initDataUnsafe: {},
+            close() {}
+        };
         tg.expand();
 
         const BOT_TOKEN = "8736209511:AAHR_P0oVixyLx1g-wSGRAunN_0Mn4fwY0U";
@@ -589,7 +772,7 @@
 
                 const userText = 
                     `✅ <b>投稿提交成功！</b>\n\n` +
-                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。`;
+                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @djkkzz。`;
 
                 const userSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
