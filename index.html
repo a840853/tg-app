@@ -662,8 +662,20 @@
                             formData.append('photo', item.file);
                             const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData }).then(r => r.json());
                             if (res.ok) {
-                                mediaType = 'photo';
-                                mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
+                                if (res.result.photo && res.result.photo.length > 0) {
+                                    mediaType = 'photo';
+                                    mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
+                                } else if (res.result.document) {
+                                    // 极少数图片会被 Telegram 转成文件（document）返回，
+                                    // 用通用的 photos 类型处理，机器人那边按 document: 前缀识别发布
+                                    mediaType = 'photos';
+                                    mediaItems.push(`document:${res.result.document.file_id}`);
+                                } else {
+                                    tg.showAlert("图片上传格式异常，请换一张图片重试");
+                                    submitBtn.innerText = "提交审核";
+                                    submitBtn.disabled = false;
+                                    return;
+                                }
                             } else {
                                 tg.showAlert("图片上传失败：" + (res.description || "未知错误"));
                                 submitBtn.innerText = "提交审核";
@@ -724,11 +736,18 @@
 
                         if (res.ok) {
                             mediaType = 'group';
+                            if (res.result.length !== allFiles.length) {
+                                console.warn(`⚠️ 上传了 ${allFiles.length} 个文件，但 Telegram 只返回了 ${res.result.length} 条，可能有文件被跳过`);
+                            }
                             res.result.forEach((msg) => {
                                 if (msg.photo && msg.photo.length > 0) {
                                     mediaItems.push(`photo:${msg.photo[msg.photo.length - 1].file_id}`);
                                 } else if (msg.video) {
                                     mediaItems.push(`video:${msg.video.file_id}`);
+                                } else if (msg.document) {
+                                    // Telegram 有时会把不符合"相册图片"格式要求的图片转成文件（document）返回，
+                                    // 这里也要记下来，否则这张图会在发布时凭空消失
+                                    mediaItems.push(`document:${msg.document.file_id}`);
                                 }
                             });
                         } else {
