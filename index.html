@@ -376,9 +376,9 @@
     </div>
 
     <div class="card">
-        <div class="card-title"><span class="badge-icon">💬</span>物品介绍</div>
+        <div class="card-title"><span class="badge-icon">💬</span><span id="descLabel">物品介绍</span></div>
         <div class="form-group">
-            <textarea id="desc" rows="4" placeholder="描述物品成色、规格、交易方式等..."></textarea>
+            <textarea id="desc" rows="4" placeholder="补充说明：具体型号、使用情况、购买时间等..."></textarea>
         </div>
     </div>
 
@@ -411,13 +411,19 @@
 
             const mediaContainer = document.getElementById('mediaContainer');
             const buyNotice = document.getElementById('buyNotice');
+            const descLabel = document.getElementById('descLabel');
+            const descInput = document.getElementById('desc');
 
             if (type === '求购') {
                 mediaContainer.style.display = 'none';
                 buyNotice.style.display = 'block';
+                descLabel.textContent = '求购说明';
+                descInput.placeholder = '补充说明：预算范围、成色要求、时间地点限制等...';
             } else {
                 mediaContainer.style.display = 'block';
                 buyNotice.style.display = 'none';
+                descLabel.textContent = '物品介绍';
+                descInput.placeholder = '补充说明：具体型号、使用情况、购买时间等...';
             }
         }
 
