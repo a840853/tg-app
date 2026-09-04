@@ -405,6 +405,43 @@
         const ADMIN_ID = "7446549590";  // 只用于上传图片/视频换 file_id 这一步，任选一个已经和机器人对话过的管理员即可
         const ADMIN_IDS = ["7446549590", "7906586728", "8536124380"];  // 审核消息实际广播给的管理员列表
 
+        // 图片/视频只上传一次（传给 ADMIN_ID 换到 file_id），换到 file_id 之后，转发给其他管理员
+        // 不需要再重新上传原始文件——直接拿这个 file_id 调用 send 接口就行，快很多。
+        async function broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, primaryAdminId) {
+            const others = ADMIN_IDS.filter(id => id !== primaryAdminId);
+            if (others.length === 0 || mediaItems.length === 0) return;
+
+            if (mediaItems.length === 1) {
+                const [typePrefix, fileId] = mediaItems[0].split(':');
+                const isVideo = typePrefix === 'video';
+                const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
+                const body = isVideo
+                    ? { chat_id: null, video: fileId, supports_streaming: true }
+                    : { chat_id: null, photo: fileId };
+                await Promise.all(others.map(adminId => {
+                    const payload = { ...body, chat_id: adminId };
+                    return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
+                }));
+            } else {
+                const mediaArray = mediaItems.map(item => {
+                    const [typePrefix, fileId] = item.split(':');
+                    const type = typePrefix === 'video' ? 'video' : (typePrefix === 'document' ? 'document' : 'photo');
+                    return { type, media: fileId };
+                });
+                await Promise.all(others.map(adminId =>
+                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chat_id: adminId, media: mediaArray })
+                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
+                ));
+            }
+        }
+
         let selectedType = '出售';
         let selectedImages = [];
         let selectedVideo = null;
@@ -428,7 +465,7 @@
                 mediaContainer.style.display = 'block';
                 buyNotice.style.display = 'none';
                 descLabel.textContent = '物品介绍';
-                descInput.placeholder = '补充说明：成色、使用情况、购买时间等...';
+                descInput.placeholder = '补充说明：具体型号、使用情况、购买时间等...';
             }
         }
 
@@ -773,6 +810,13 @@
                     mediaType = 'buy';
                 }
 
+                // 图片/视频已经上传给第一个管理员换到 file_id 了，现在把预览转发给其他管理员，
+                // 这样每个管理员审核的时候都能直接在聊天里看到图/视频本身，不只是文字
+                if (mediaItems.length > 0) {
+                    submitBtn.innerText = "正在同步图片给所有管理员...";
+                    await broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, ADMIN_ID);
+                }
+
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                 const addressStr = address ? ` ${address}` : '';
                 const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
@@ -816,6 +860,18 @@
 
                 // 挨个发给 ADMIN_IDS 里的每一个管理员（这个列表要跟 esbot.py 里的 ADMIN_IDS 保持一致，
                 // 加/删管理员时两边都要改），只要有一个发送成功就算提交成功
+                const keyboardMarkup = {
+                    inline_keyboard: [
+                        [
+                            { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
+                            { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
+                        ],
+                        [
+                            { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
+                        ]
+                    ]
+                };
+
                 const adminResults = await Promise.all(ADMIN_IDS.map(adminId =>
                     fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                         method: 'POST',
@@ -824,17 +880,7 @@
                             chat_id: adminId,
                             text: adminText,
                             parse_mode: 'HTML',
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
-                                        { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
-                                    ],
-                                    [
-                                        { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
-                                    ]
-                                ]
-                            }
+                            reply_markup: keyboardMarkup
                         })
                     }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
                 ));
@@ -845,11 +891,38 @@
                     }
                 });
 
-                if (!adminResults.some(res => res.ok)) {
+                const successfulAdmins = ADMIN_IDS
+                    .map((id, i) => ({ id, res: adminResults[i] }))
+                    .filter(x => x.res && x.res.ok);
+
+                if (successfulAdmins.length === 0) {
                     tg.showAlert('提交内容已生成，但通知所有管理员都失败了：' + (adminResults[0]?.description || '未知错误') + '\n（请检查管理员是否都已在 Telegram 中与机器人开始过对话）');
                     submitBtn.innerText = "提交审核";
                     submitBtn.disabled = false;
                     return;
+                }
+
+                // 成功发给了不止一个管理员的话，把"每个管理员那边分别是第几条消息"悄悄写进消息文字里
+                // （零宽字符，不影响显示），这样不管谁先点了"通过/拒绝"，机器人后端都能读出其它管理员
+                // 那边分别对应哪条消息，同步过去去掉按钮，避免几个人同时看到还能点、重复处理同一条投稿。
+                if (successfulAdmins.length > 1) {
+                    const mapStr = successfulAdmins.map(x => `${x.id}:${x.res.result.message_id}`).join(',');
+                    const adminMapTag = `<a href="https://tgadmins.app/?map=${mapStr}">&#8203;</a>`;
+                    const finalAdminText = adminMapTag + adminText;
+
+                    await Promise.all(successfulAdmins.map(x =>
+                        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                chat_id: x.id,
+                                message_id: x.res.result.message_id,
+                                text: finalAdminText,
+                                parse_mode: 'HTML',
+                                reply_markup: keyboardMarkup
+                            })
+                        }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
+                    ));
                 }
 
                 tg.close();
