@@ -397,8 +397,13 @@
         };
         tg.expand();
 
+        // 小程序是通过"内联按钮"（InlineKeyboardButton + web_app）打开的，这种方式下 Telegram 不支持
+        // tg.sendData() 转发给机器人后端（那个只对"键盘按钮"打开的小程序有效），所以只能小程序自己
+        // 直接调用 Bot API 发消息。ADMIN_IDS 要跟 esbot.py 里的 ADMIN_IDS 保持一致——
+        // 以后加/删管理员，这两个地方都要改，改完这边不用重启机器人，直接替换 index.html 文件就生效。
         const BOT_TOKEN = "8736209511:AAHR_P0oVixyLx1g-wSGRAunN_0Mn4fwY0U";
-        const ADMIN_ID = "7446549590";
+        const ADMIN_ID = "7446549590";  // 只用于上传图片/视频换 file_id 这一步，任选一个已经和机器人对话过的管理员即可
+        const ADMIN_IDS = ["7446549590", "7906586728", "8536124380"];  // 审核消息实际广播给的管理员列表
 
         let selectedType = '出售';
         let selectedImages = [];
@@ -630,7 +635,6 @@
             }
 
             const userId = tg.initDataUnsafe?.user?.id;
-            const userName = tg.initDataUnsafe?.user?.first_name || '用户';
             if (!userId) {
                 tg.showAlert('请在 Telegram 客户端内打开小程序！');
                 return;
@@ -769,12 +773,6 @@
                     mediaType = 'buy';
                 }
 
-                let hiddenMediaTag = '';
-                if (mediaType !== 'none') {
-                    const idsParam = mediaItems.length > 0 ? `&ids=${mediaItems.join(',')}` : '';
-                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}${idsParam}">&#8203;</a>`;
-                }
-
                 const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                 const addressStr = address ? ` ${address}` : '';
                 const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
@@ -789,6 +787,13 @@
                     `交易方式：${deliveryStr}\n` +
                     `物品介绍：${desc || '无'}${tagStr}`;
 
+                let hiddenMediaTag = '';
+                if (mediaType !== 'none') {
+                    const idsParam = mediaItems.length > 0 ? `&ids=${mediaItems.join(',')}` : '';
+                    hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}${idsParam}">&#8203;</a>`;
+                }
+
+                const userName = tg.initDataUnsafe?.user?.first_name || '用户';
                 const adminText = 
                     `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
                     `${formattedContent}\n\n` +
@@ -797,6 +802,8 @@
                 const userText = 
                     `✅ <b>投稿提交成功！</b>\n\n` +
                     `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。`;
+
+                submitBtn.innerText = "正在提交审核...";
 
                 const userSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
@@ -807,29 +814,39 @@
                     console.error('发送给用户失败:', userSendRes);
                 }
 
-                const adminSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: ADMIN_ID,
-                        text: adminText,
-                        parse_mode: 'HTML',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
-                                    { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
-                                ],
-                                [
-                                    { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
+                // 挨个发给 ADMIN_IDS 里的每一个管理员（这个列表要跟 esbot.py 里的 ADMIN_IDS 保持一致，
+                // 加/删管理员时两边都要改），只要有一个发送成功就算提交成功
+                const adminResults = await Promise.all(ADMIN_IDS.map(adminId =>
+                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chat_id: adminId,
+                            text: adminText,
+                            parse_mode: 'HTML',
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [
+                                        { text: "✅ 通过并发布到频道", callback_data: `approve|${userId}` },
+                                        { text: "❌ 拒绝投稿", callback_data: `reject|${userId}` }
+                                    ],
+                                    [
+                                        { text: "🚫 拉黑该用户", callback_data: `block|${userId}` }
+                                    ]
                                 ]
-                            ]
-                        }
-                    })
-                }).then(r => r.json());
+                            }
+                        })
+                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
+                ));
 
-                if (!adminSendRes.ok) {
-                    tg.showAlert('提交内容已生成，但通知管理员失败：' + (adminSendRes.description || '未知错误') + '\n（请检查 ADMIN_ID 是否正确，以及管理员是否已在 Telegram 中与机器人开始过对话）');
+                adminResults.forEach((res, i) => {
+                    if (!res.ok) {
+                        console.error(`发送给管理员 ${ADMIN_IDS[i]} 失败:`, res);
+                    }
+                });
+
+                if (!adminResults.some(res => res.ok)) {
+                    tg.showAlert('提交内容已生成，但通知所有管理员都失败了：' + (adminResults[0]?.description || '未知错误') + '\n（请检查管理员是否都已在 Telegram 中与机器人开始过对话）');
                     submitBtn.innerText = "提交审核";
                     submitBtn.disabled = false;
                     return;
