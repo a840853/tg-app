@@ -115,7 +115,7 @@
         .form-group { margin-bottom: 15px; }
         .form-group:last-child { margin-bottom: 0; }
         label { display: block; margin-bottom: 7px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
-        label span { color: var(--danger); margin-left: 2px; }
+        .req-star { color: var(--danger); margin-left: 2px; }
 
         input, select, textarea {
             width: 100%; padding: 12px 13px; border-radius: 11px; border: 1.5px solid var(--field-border);
@@ -247,9 +247,9 @@
     </div>
 
     <div class="card" id="mediaContainer">
-        <div class="card-title"><span class="badge-icon">📷</span>商品图片与视频</div>
+        <div class="card-title"><span class="badge-icon">📷</span><span id="mediaCardTitle">商品图片与视频</span></div>
         <div class="form-group">
-            <label>商品图片（第一张为封面，最多9张）</label>
+            <label><span id="mediaLabel">商品图片</span>（第一张为封面，最多9张）</label>
             <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
             <div class="media-grid" id="imagePreviewGrid"></div>
             <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
@@ -267,6 +267,10 @@
                 <span>添加视频</span>
             </div>
         </div>
+
+        <p id="mediaRentHint" style="display:none; font-size:12px; color:var(--text-muted); margin:4px 0 0;">
+            📌 房屋转租请至少上传一张图片或一个视频
+        </p>
     </div>
 
     <div class="buy-notice" id="buyNotice">
@@ -276,13 +280,13 @@
     <div class="card">
         <div class="card-title"><span class="badge-icon">📝</span>基本信息</div>
         <div class="form-group">
-            <label>物品名称 <span>*</span></label>
+            <label><span id="titleLabel">物品名称</span> <span class="req-star">*</span></label>
             <input type="text" id="title" placeholder="例如：iPhone 15 Pro / 厨房用品">
         </div>
 
         <div class="row">
             <div class="col form-group" style="flex: 1.8;">
-                <label><span id="priceLabel">价格</span> <span>*</span></label>
+                <label><span id="priceLabel">价格</span> <span class="req-star">*</span></label>
                 <div style="display:flex; gap:8px;">
                     <input type="text" id="price" placeholder="如 68" style="flex:1.3;">
                     <select id="priceUnit" style="flex:1;">
@@ -300,7 +304,7 @@
                 </div>
             </div>
             <div class="col form-group" style="flex: 0.9;">
-                <label>城市 <span>*</span></label>
+                <label>城市 <span class="req-star">*</span></label>
                 <select id="city">
                     <option value="西港">西港</option>
                     <option value="金边">金边</option>
@@ -326,11 +330,11 @@
 
         <div class="row" id="rentFields" style="display:none;">
             <div class="col form-group">
-                <label>押金 <span>*</span></label>
+                <label>押金 <span class="req-star">*</span></label>
                 <input type="text" id="deposit" placeholder="如 100 / 无押金">
             </div>
             <div class="col form-group">
-                <label>入住时间 <span>*</span></label>
+                <label>入住时间 <span class="req-star">*</span></label>
                 <input type="text" id="moveInTime" placeholder="如 随时 / 月底">
             </div>
         </div>
@@ -339,12 +343,12 @@
     <div class="card">
         <div class="card-title"><span class="badge-icon">☎️</span>联系与交易</div>
         <div class="form-group">
-            <label>联系方式 <span>*</span></label>
+            <label>联系方式 <span class="req-star">*</span></label>
             <input type="text" id="contact" placeholder="@你的用户名 或 电话">
         </div>
 
         <div class="form-group" id="deliveryGroup">
-            <label>交易方式 <span>*</span></label>
+            <label>交易方式 <span class="req-star">*</span></label>
             <div class="tags-container" id="deliveryTags">
                 <div class="tag-btn active" onclick="toggleDelivery(this)">自取</div>
                 <div class="tag-btn active" onclick="toggleDelivery(this)">送货上门</div>
@@ -355,7 +359,7 @@
     <div class="card" id="categoryCard">
         <div class="card-title"><span class="badge-icon">🏷️</span>分类与标签</div>
         <div class="form-group">
-            <label>商品类别 <span>*</span></label>
+            <label>商品类别 <span class="req-star">*</span></label>
             <select id="category">
                 <option value="" selected disabled>请选择商品类别</option>
                 <option value="生活闲置">生活闲置</option>
@@ -479,6 +483,10 @@
             const deliveryGroup = document.getElementById('deliveryGroup');
             const categoryCard = document.getElementById('categoryCard');
             const rentFields = document.getElementById('rentFields');
+            const titleLabel = document.getElementById('titleLabel');
+            const mediaLabel = document.getElementById('mediaLabel');
+            const mediaCardTitle = document.getElementById('mediaCardTitle');
+            const mediaRentHint = document.getElementById('mediaRentHint');
 
             if (type === '求购') {
                 mediaContainer.style.display = 'none';
@@ -487,8 +495,10 @@
                 deliveryGroup.style.display = 'block';
                 categoryCard.style.display = 'block';
                 priceLabel.textContent = '价格';
+                titleLabel.textContent = '物品名称';
                 descLabel.textContent = '求购说明';
                 descInput.placeholder = '补充说明：预算范围、成色要求、时间地点限制等...';
+                mediaRentHint.style.display = 'none';
             } else if (type === '房屋转租') {
                 mediaContainer.style.display = 'block';
                 buyNotice.style.display = 'none';
@@ -496,8 +506,12 @@
                 deliveryGroup.style.display = 'none';
                 categoryCard.style.display = 'none';
                 priceLabel.textContent = '租金';
+                titleLabel.textContent = '标题';
+                mediaLabel.textContent = '房屋图片';
+                mediaCardTitle.innerHTML = '房屋图片与视频 <span class="req-star">*</span>';
                 descLabel.textContent = '房屋介绍';
                 descInput.placeholder = '补充说明：房屋朝向、周边环境、看房时间等...';
+                mediaRentHint.style.display = 'block';
             } else {
                 mediaContainer.style.display = 'block';
                 buyNotice.style.display = 'none';
@@ -505,8 +519,12 @@
                 deliveryGroup.style.display = 'block';
                 categoryCard.style.display = 'block';
                 priceLabel.textContent = '价格';
+                titleLabel.textContent = '物品名称';
+                mediaLabel.textContent = '商品图片';
+                mediaCardTitle.textContent = '商品图片与视频';
                 descLabel.textContent = '物品介绍';
                 descInput.placeholder = '补充说明：具体型号、使用情况、购买时间等...';
+                mediaRentHint.style.display = 'none';
             }
         }
 
@@ -714,6 +732,11 @@
             const isRent = selectedType === '房屋转租';
             if (!title || !price || !contact || (!isRent && !category) || (isRent && (!deposit || !moveInTime))) {
                 tg.showAlert('请填写完整带 * 的必填项！');
+                return;
+            }
+
+            if (isRent && selectedImages.length === 0 && !selectedVideo) {
+                tg.showAlert('房屋转租请至少上传一张图片或一个视频！');
                 return;
             }
 
