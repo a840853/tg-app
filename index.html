@@ -563,7 +563,76 @@
             document.getElementById('imageInput').click();
         }
 
-        function handleImageSelect(e) {
+        // Telegram 对图片有硬性要求：宽+高不能超过10000像素，长边不能超过短边的20倍（比如特别长的截图）。
+        // 手机 Telegram 客户端发图片时 APP 自己会先处理好，但小程序这边是直接把原始文件传上去的，
+        // 没有这层预处理，所以尺寸不符合要求的图片会被 Telegram 直接拒绝，报一堆英文看不懂的错误。
+        // 这里在真正上传之前，先检测一遍，超标的自动裁剪/缩放到安全范围内，正常图片不受影响。
+        function sanitizeImageFile(file) {
+            return new Promise((resolve) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    const w = img.naturalWidth, h = img.naturalHeight;
+                    URL.revokeObjectURL(url);
+
+                    if (!w || !h) {
+                        // 读不出尺寸（图片可能损坏），原样返回，交给 Telegram 自己判断
+                        resolve(file);
+                        return;
+                    }
+
+                    const ratio = Math.max(w, h) / Math.min(w, h);
+                    const sumOk = (w + h) <= 10000;
+                    const ratioOk = ratio <= 20;
+
+                    if (sumOk && ratioOk) {
+                        resolve(file);
+                        return;
+                    }
+
+                    // 先修长宽比：太长/太窄的图，从中间裁掉多余部分，比例控制在 18:1（留点余量，不卡在临界值上）
+                    let cropW = w, cropH = h;
+                    if (!ratioOk) {
+                        const safeRatio = 18;
+                        if (w > h) {
+                            cropW = Math.floor(h * safeRatio);
+                        } else {
+                            cropH = Math.floor(w * safeRatio);
+                        }
+                    }
+                    const offsetX = Math.floor((w - cropW) / 2);
+                    const offsetY = Math.floor((h - cropH) / 2);
+
+                    // 裁完之后如果宽+高还是超过10000，等比例缩小到安全范围内
+                    let outW = cropW, outH = cropH;
+                    if ((outW + outH) > 9500) {
+                        const scale = 9500 / (outW + outH);
+                        outW = Math.floor(outW * scale);
+                        outH = Math.floor(outH * scale);
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = outW;
+                    canvas.height = outH;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, offsetX, offsetY, cropW, cropH, 0, 0, outW, outH);
+                    canvas.toBlob((blob) => {
+                        if (!blob) {
+                            resolve(file);
+                            return;
+                        }
+                        resolve(new File([blob], file.name || 'photo.jpg', { type: 'image/jpeg' }));
+                    }, 'image/jpeg', 0.92);
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    resolve(file); // 读取失败就原样返回，交给后面正常的大小校验/上传流程处理
+                };
+                img.src = url;
+            });
+        }
+
+        async function handleImageSelect(e) {
             const files = Array.from(e.target.files);
             for (let file of files) {
                 if (selectedImages.length >= 9) break;
@@ -571,7 +640,8 @@
                     tg.showAlert(`图片 [${file.name}] 超过 10MB，已被跳过`);
                     continue;
                 }
-                selectedImages.push(file);
+                const fixed = await sanitizeImageFile(file);
+                selectedImages.push(fixed);
             }
             e.target.value = '';
             renderImagePreviews();
