@@ -993,28 +993,16 @@
                     `${formattedContent}\n\n` +
                     `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
 
-                // 投稿人自己这条确认消息也把内容本身显示出来（方便以后想改的时候知道自己写了什么），
-                // 并且同样嵌一份隐藏标签（图片信息），格式要跟后端 split_user_confirmation_text() 对得上，
-                // 改动这段文字的话，esbot.py 里那个函数的正则也要跟着改
-                const userText =
-                    `${hiddenMediaTag}✅ <b>投稿提交成功！</b>\n\n` +
-                    `${formattedContent}\n\n` +
-                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。\n\n` +
-                    `💡 审核通过前，您可以随时修改内容或取消投稿。`;
+                const userText = 
+                    `✅ <b>投稿提交成功！</b>\n\n` +
+                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。`;
 
                 submitBtn.innerText = "正在提交审核...";
-
-                const userKeyboardMarkup = {
-                    inline_keyboard: [[
-                        { text: "✏️ 修改内容", callback_data: `useredit|${userId}` },
-                        { text: "❌ 取消投稿", callback_data: `usercancel|${userId}` }
-                    ]]
-                };
 
                 const userSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML', reply_markup: userKeyboardMarkup })
+                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
                 }).then(r => r.json());
                 if (!userSendRes.ok) {
                     console.error('发送给用户失败:', userSendRes);
@@ -1068,8 +1056,6 @@
                 // 成功发给了不止一个管理员的话，把"每个管理员那边分别是第几条消息"悄悄写进消息文字里
                 // （零宽字符，不影响显示），这样不管谁先点了"通过/拒绝"，机器人后端都能读出其它管理员
                 // 那边分别对应哪条消息，同步过去去掉按钮，避免几个人同时看到还能点、重复处理同一条投稿。
-                // 投稿人自己那条确认消息也嵌一份同样的映射——这样投稿人点"修改/取消"时，机器人也能找到
-                // 该同步更新哪些管理员的消息。
                 if (successfulAdmins.length > 1) {
                     const mapStr = successfulAdmins.map(x => `${x.id}:${x.res.result.message_id}`).join(',');
                     const adminMapTag = `<a href="https://tgadmins.app/?map=${mapStr}">&#8203;</a>`;
@@ -1088,21 +1074,6 @@
                             })
                         }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
                     ));
-
-                    if (userSendRes.ok) {
-                        const finalUserText = adminMapTag + userText;
-                        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                chat_id: userId,
-                                message_id: userSendRes.result.message_id,
-                                text: finalUserText,
-                                parse_mode: 'HTML',
-                                reply_markup: userKeyboardMarkup
-                            })
-                        }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
-                    }
                 }
 
                 tg.close();
