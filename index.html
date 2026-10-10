@@ -241,6 +241,19 @@
             color: #fff; font-size: 18px; font-weight: 700; line-height: 1.7; max-width: 420px;
         }
         .drop-overlay-box small { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-top: 6px; }
+        /* 已上传图片：拖拽换位置 */
+        .preview-item { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+        .preview-item img { -webkit-user-drag: none; pointer-events: none; }
+        .preview-item.dragging { opacity: 0.3; }
+        .preview-item.drop-target { outline: 2px solid var(--coral); outline-offset: -2px; transform: scale(0.94); }
+        .preview-item .cover-badge {
+            position: absolute; top: 4px; left: 4px; background: rgba(255, 107, 74, 0.92); color: #fff;
+            font-size: 10px; padding: 1px 6px; border-radius: 20px; z-index: 5; font-weight: 700;
+        }
+        .drag-ghost { position: fixed; z-index: 10000; pointer-events: none; opacity: 0.92; transform: scale(1.08);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55); cursor: grabbing; }
+        body.is-dragging-image { user-select: none; -webkit-user-select: none; }
+        .reorder-hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
         .drop-hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
         @media (hover: none) { .drop-hint { display: none; } }  /* 手机上没法拖拽，不显示这行提示 */
     </style>
@@ -268,6 +281,7 @@
             <label><span id="mediaLabel">商品图片</span>（第一张为封面，最多9张）</label>
             <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
             <div class="media-grid" id="imagePreviewGrid"></div>
+            <p class="reorder-hint" id="reorderHint" style="display:none;">💡 按住图片拖动，可以调整顺序（和另一张交换位置）</p>
             <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
                 <span>+</span>
                 <span>添加图片</span>
@@ -444,7 +458,8 @@
         const ADMIN_ID = "7446549590";  // 只用于上传图片/视频换 file_id 这一步，任选一个已经和机器人对话过的管理员即可
         const ADMIN_IDS = ["7446549590", "7906586728", "8536124380"];  // 审核消息实际广播给的管理员列表
 
-        // 图片/视频只上传一次（传给 ADMIN_ID 换到 file_id），换到 file_id 之后，转发给其他管理员
+        // 图片/视频只上传一次（现在是先传到投稿人自己的聊天里换到 file_id，这同时就是给投稿人看的预览），
+        // 换到 file_id 之后，转发给所有管理员（primaryAdminId 是上传的那个聊天，已经有了就不重复发）。
         // 不需要再重新上传原始文件——直接拿这个 file_id 调用 send 接口就行，快很多。
         async function broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, primaryAdminId) {
             const others = ADMIN_IDS.filter(id => id !== primaryAdminId);
@@ -453,10 +468,11 @@
             if (mediaItems.length === 1) {
                 const [typePrefix, fileId] = mediaItems[0].split(':');
                 const isVideo = typePrefix === 'video';
-                const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
+                const isDoc = typePrefix === 'document';
+                const endpoint = isVideo ? 'sendVideo' : (isDoc ? 'sendDocument' : 'sendPhoto');
                 const body = isVideo
                     ? { chat_id: null, video: fileId, supports_streaming: true }
-                    : { chat_id: null, photo: fileId };
+                    : (isDoc ? { chat_id: null, document: fileId } : { chat_id: null, photo: fileId });
                 await Promise.all(others.map(adminId => {
                     const payload = { ...body, chat_id: adminId };
                     return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
@@ -514,6 +530,116 @@
             }
             throw lastErr;
         }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // 发普通（JSON）请求：网络失败也不抛错，统一返回 { ok:false, description }，由调用方决定怎么处理
+        function tgJson(method, payload) {
+            return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
+        }
+
+        // ========== 防重复提交 ==========
+        // 以前：图片先传给第一个管理员，后面任何一步失败，用户重新点提交就会再传一遍，管理员那边就多出一份重复的图片。
+        // 现在：图片传到投稿人自己的聊天里换 file_id，并且成功上传一次后记下来（uploadCache），
+        // 同一批文件重试时直接复用，不再重新上传、也不再重复同步给管理员；审核卡片送达后（cardsDelivered）更不会再发第二份。
+        let uploadCache = null;      // { sig, mediaType, mediaItems, uploadedChat, synced }
+        let cardsDelivered = false;
+        const CANNOT_DM_RE = /can't initiate|chat not found|forbidden|blocked|deactivated|peer_id_invalid/i;
+
+        function mediaSignature(allFiles) {
+            return selectedType + '|' + allFiles.map(f => `${f.type}:${f.file.name}:${f.file.size}:${f.file.lastModified || 0}`).join('|');
+        }
+
+        // 把图片/视频上传到指定聊天，换回 file_id。
+        // 返回 { ok:true, mediaType, mediaItems } 或 { ok:false, message, canFallback }；网络层面的失败会抛出异常（由最外层统一提示）
+        async function uploadMediaTo(chatId, allFiles, setStatus) {
+            const fail = (message, description) => ({ ok: false, message, canFallback: CANNOT_DM_RE.test(description || '') });
+
+            if (allFiles.length === 1) {
+                const item = allFiles[0];
+                const formData = new FormData();
+                formData.append('chat_id', chatId);
+                if (item.type === 'photo') {
+                    setStatus("正在上传图片...");
+                    formData.append('photo', item.file);
+                    const res = await tgUpload('sendPhoto', formData);
+                    if (!res.ok) return fail("图片上传失败：" + (res.description || "未知错误"), res.description);
+                    if (res.result.photo && res.result.photo.length > 0) {
+                        return { ok: true, mediaType: 'photo', mediaItems: [`photo:${res.result.photo.pop().file_id}`] };
+                    }
+                    if (res.result.document) {
+                        // 极少数图片会被 Telegram 转成文件（document）返回，
+                        // 用通用的 photos 类型处理，机器人那边按 document: 前缀识别发布
+                        return { ok: true, mediaType: 'photos', mediaItems: [`document:${res.result.document.file_id}`] };
+                    }
+                    return fail("图片上传格式异常，请换一张图片重试");
+                }
+                setStatus("正在处理视频封面...");
+                const thumbInfo = await captureVideoThumbnail(item.file);
+                formData.append('video', item.file);
+                formData.append('supports_streaming', 'true');
+                if (thumbInfo && thumbInfo.blob) {
+                    formData.append('thumbnail', thumbInfo.blob, 'thumb.jpg');
+                    formData.append('width', thumbInfo.width);
+                    formData.append('height', thumbInfo.height);
+                    formData.append('duration', thumbInfo.duration);
+                }
+                setStatus("正在上传视频...");
+                const res = await tgUpload('sendVideo', formData);
+                if (!res.ok) return fail("视频上传失败：" + (res.description || "请检查视频格式或文件大小"), res.description);
+                if (!res.result.video) return fail("这个视频的格式 Telegram 无法识别为视频，请转换成 MP4（H.264 编码）后重新上传。");
+                return { ok: true, mediaType: 'video', mediaItems: [`video:${res.result.video.file_id}`] };
+            }
+
+            setStatus(`正在处理 ${allFiles.length} 个媒体文件...`);
+            const formData = new FormData();
+            formData.append('chat_id', chatId);
+            const mediaArray = [];
+            for (let i = 0; i < allFiles.length; i++) {
+                const item = allFiles[i];
+                formData.append(`file${i}`, item.file);
+                const mediaItem = { type: item.type, media: `attach://file${i}` };
+                if (item.type === 'video') {
+                    const thumbInfo = await captureVideoThumbnail(item.file);
+                    if (thumbInfo && thumbInfo.blob) {
+                        formData.append(`thumb${i}`, thumbInfo.blob, `thumb${i}.jpg`);
+                        mediaItem.thumbnail = `attach://thumb${i}`;
+                        mediaItem.width = thumbInfo.width;
+                        mediaItem.height = thumbInfo.height;
+                        mediaItem.duration = thumbInfo.duration;
+                    }
+                    mediaItem.supports_streaming = true;
+                }
+                mediaArray.push(mediaItem);
+            }
+            formData.append('media', JSON.stringify(mediaArray));
+            setStatus(`正在上传 ${allFiles.length} 个媒体文件...`);
+            const res = await tgUpload('sendMediaGroup', formData);
+            if (!res.ok) return fail("文件上传失败：" + (res.description || "请检查文件大小或格式"), res.description);
+            if (res.result.length !== allFiles.length) {
+                console.warn(`⚠️ 上传了 ${allFiles.length} 个文件，但 Telegram 只返回了 ${res.result.length} 条，可能有文件被跳过`);
+            }
+            const mediaItems = [];
+            res.result.forEach((msg) => {
+                if (msg.photo && msg.photo.length > 0) {
+                    mediaItems.push(`photo:${msg.photo[msg.photo.length - 1].file_id}`);
+                } else if (msg.video) {
+                    mediaItems.push(`video:${msg.video.file_id}`);
+                } else if (msg.document) {
+                    // Telegram 有时会把不符合"相册图片"格式要求的图片转成文件（document）返回，
+                    // 这里也要记下来，否则这张图会在发布时凭空消失
+                    mediaItems.push(`document:${msg.document.file_id}`);
+                }
+            });
+            return { ok: true, mediaType: 'group', mediaItems };
+        }
+        // ========== 防重复提交结束 ==========
 
         function describeSubmitError(err) {
             switch (err && err.code) {
@@ -754,6 +880,14 @@
             renderImagePreviews();
         }
 
+        // 每个 File 只生成一次预览地址，反复刷新（比如拖拽换位置）时复用，不重复创建、也不闪烁
+        const imageUrlCache = new WeakMap();
+        function imageUrlFor(file) {
+            let url = imageUrlCache.get(file);
+            if (!url) { url = URL.createObjectURL(file); imageUrlCache.set(file, url); }
+            return url;
+        }
+
         function renderImagePreviews() {
             const container = document.getElementById('imagePreviewGrid');
             container.innerHTML = '';
@@ -761,17 +895,146 @@
                 const div = document.createElement('div');
                 div.className = 'preview-item';
                 const img = document.createElement('img');
-                img.src = URL.createObjectURL(file);
+                img.src = imageUrlFor(file);
+                img.draggable = false;
                 const removeBtn = document.createElement('div');
                 removeBtn.className = 'remove-btn';
                 removeBtn.innerText = '×';
                 removeBtn.onclick = (e) => { e.stopPropagation(); removeImage(index); };
                 div.appendChild(img);
+                if (index === 0) {
+                    const badge = document.createElement('div');
+                    badge.className = 'cover-badge';
+                    badge.innerText = '封面';
+                    div.appendChild(badge);
+                }
                 div.appendChild(removeBtn);
+                div.addEventListener('pointerdown', (e) => startImageDrag(e, div, index));
                 container.appendChild(div);
             });
             document.getElementById('imageUploadBox').style.display = selectedImages.length >= 9 ? 'none' : 'flex';
+            document.getElementById('reorderHint').style.display = selectedImages.length >= 2 ? 'block' : 'none';
         }
+
+        // ========== 已上传图片：拖拽交换位置 ==========
+        // 电脑：按住鼠标直接拖；手机：长按一下（约 0.3 秒）再拖，这样平时手指在图片上滑动还是正常滚动页面。
+        // 松手时落在哪张图上，就和那张图交换位置；排在第一位的就是封面，发布时的图片顺序也以这里为准。
+        const DRAG_LONG_PRESS_MS = 320;
+        const DRAG_MOVE_THRESHOLD = 6;
+        let imageDrag = null;
+
+        function swapImages(i, j) {
+            if (i === j || i < 0 || j < 0 || i >= selectedImages.length || j >= selectedImages.length) return;
+            const tmp = selectedImages[i];
+            selectedImages[i] = selectedImages[j];
+            selectedImages[j] = tmp;
+            renderImagePreviews();
+        }
+
+        function haptic() { try { tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light'); } catch (e) {} }
+
+        function startImageDrag(e, div, index) {
+            if (imageDrag) return;
+            if (e.target.closest && e.target.closest('.remove-btn')) return;
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            imageDrag = {
+                pointerId: e.pointerId, index, div, active: false, over: -1, ghost: null, timer: null,
+                touch: e.pointerType !== 'mouse',
+                startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY
+            };
+            if (imageDrag.touch) imageDrag.timer = setTimeout(activateImageDrag, DRAG_LONG_PRESS_MS);
+            window.addEventListener('pointermove', onImageDragMove);
+            window.addEventListener('pointerup', onImageDragEnd);
+            window.addEventListener('pointercancel', cancelImageDrag);
+        }
+
+        function activateImageDrag() {
+            if (!imageDrag || imageDrag.active) return;
+            const d = imageDrag;
+            d.active = true;
+            const rect = d.div.getBoundingClientRect();
+            const ghost = d.div.cloneNode(true);
+            ghost.classList.add('drag-ghost');
+            ghost.style.width = rect.width + 'px';
+            ghost.style.height = rect.height + 'px';
+            document.body.appendChild(ghost);
+            d.ghost = ghost;
+            d.offsetX = d.startX - rect.left;
+            d.offsetY = d.startY - rect.top;
+            d.div.classList.add('dragging');
+            document.body.classList.add('is-dragging-image');
+            moveImageGhost();
+            haptic();
+        }
+
+        function moveImageGhost() {
+            const d = imageDrag;
+            if (!d || !d.ghost) return;
+            d.ghost.style.left = (d.x - d.offsetX) + 'px';
+            d.ghost.style.top = (d.y - d.offsetY) + 'px';
+        }
+
+        function updateImageDropTarget() {
+            const d = imageDrag;
+            const container = document.getElementById('imagePreviewGrid');
+            const el = document.elementFromPoint(d.x, d.y);
+            const item = el && el.closest ? el.closest('.preview-item') : null;
+            let over = item ? Array.from(container.children).indexOf(item) : -1;
+            if (over === d.index) over = -1;
+            if (over !== d.over) {
+                Array.from(container.children).forEach(c => c.classList.remove('drop-target'));
+                if (over >= 0) container.children[over].classList.add('drop-target');
+                d.over = over;
+            }
+        }
+
+        function onImageDragMove(e) {
+            const d = imageDrag;
+            if (!d || e.pointerId !== d.pointerId) return;
+            d.x = e.clientX; d.y = e.clientY;
+            const moved = Math.hypot(d.x - d.startX, d.y - d.startY);
+            if (!d.active) {
+                if (d.touch) {
+                    if (moved > 10) cleanupImageDrag();   // 长按还没触发手指就动了 = 想滚动页面，放弃拖拽
+                    return;
+                }
+                if (moved < DRAG_MOVE_THRESHOLD) return;
+                activateImageDrag();
+            }
+            moveImageGhost();
+            updateImageDropTarget();
+        }
+
+        function onImageDragEnd(e) {
+            const d = imageDrag;
+            if (!d || e.pointerId !== d.pointerId) return;
+            const doSwap = d.active && d.over >= 0;
+            const from = d.index, to = d.over;
+            cleanupImageDrag();
+            if (doSwap) { swapImages(from, to); haptic(); }
+        }
+
+        function cancelImageDrag(e) {
+            if (imageDrag && (!e || e.pointerId === imageDrag.pointerId)) cleanupImageDrag();
+        }
+
+        function cleanupImageDrag() {
+            const d = imageDrag;
+            if (!d) return;
+            clearTimeout(d.timer);
+            if (d.ghost) d.ghost.remove();
+            d.div.classList.remove('dragging');
+            Array.from(document.getElementById('imagePreviewGrid').children).forEach(c => c.classList.remove('drop-target'));
+            document.body.classList.remove('is-dragging-image');
+            window.removeEventListener('pointermove', onImageDragMove);
+            window.removeEventListener('pointerup', onImageDragEnd);
+            window.removeEventListener('pointercancel', cancelImageDrag);
+            imageDrag = null;
+        }
+
+        // 拖拽进行中禁止页面跟着滚动（手机上长按后拖动图片时）
+        document.addEventListener('touchmove', (e) => { if (imageDrag && imageDrag.active) e.preventDefault(); }, { passive: false });
+        // ========== 拖拽交换位置结束 ==========
 
         function triggerVideoInput() {
             document.getElementById('videoInput').click();
@@ -948,6 +1211,7 @@
 
         document.getElementById('submitBtn').addEventListener('click', async function() {
             const submitBtn = document.getElementById('submitBtn');
+            if (cardsDelivered) return;   // 审核卡片已经发出去了，不能再提交第二次
             
             const title = document.getElementById('title').value.trim();
             const price = document.getElementById('price').value.trim();
@@ -982,174 +1246,87 @@
 
             submitBtn.innerText = "正在准备提交...";
             submitBtn.disabled = true;
+            const setStatus = (t) => { submitBtn.innerText = t; };
+            const resetBtn = () => { submitBtn.innerText = "提交审核"; submitBtn.disabled = false; };
 
             try {
                 let mediaType = 'none';
                 let mediaItems = [];
 
                 if (selectedType === '出售' || selectedType === '房屋转租') {
-                    let allFiles = [];
+                    const allFiles = [];
                     selectedImages.forEach(img => allFiles.push({ type: 'photo', file: img }));
-                    if (selectedVideo) {
-                        allFiles.push({ type: 'video', file: selectedVideo });
-                    }
+                    if (selectedVideo) allFiles.push({ type: 'video', file: selectedVideo });
 
                     if (allFiles.length > 10) {
                         tg.showAlert('图片 + 视频总数最多 10 个（Telegram 相册上限），请删减后再提交');
-                        submitBtn.innerText = "提交审核";
-                        submitBtn.disabled = false;
+                        resetBtn();
                         return;
                     }
 
-                    if (allFiles.length === 1) {
-                        const item = allFiles[0];
-                        const formData = new FormData();
-                        formData.append('chat_id', ADMIN_ID);
-
-                        if (item.type === 'photo') {
-                            submitBtn.innerText = "正在上传图片...";
-                            formData.append('photo', item.file);
-                            const res = await tgUpload('sendPhoto', formData);
-                            if (res.ok) {
-                                if (res.result.photo && res.result.photo.length > 0) {
-                                    mediaType = 'photo';
-                                    mediaItems.push(`photo:${res.result.photo.pop().file_id}`);
-                                } else if (res.result.document) {
-                                    // 极少数图片会被 Telegram 转成文件（document）返回，
-                                    // 用通用的 photos 类型处理，机器人那边按 document: 前缀识别发布
-                                    mediaType = 'photos';
-                                    mediaItems.push(`document:${res.result.document.file_id}`);
-                                } else {
-                                    tg.showAlert("图片上传格式异常，请换一张图片重试");
-                                    submitBtn.innerText = "提交审核";
-                                    submitBtn.disabled = false;
-                                    return;
-                                }
-                            } else {
-                                tg.showAlert("图片上传失败：" + (res.description || "未知错误"));
-                                submitBtn.innerText = "提交审核";
-                                submitBtn.disabled = false;
-                                return;
-                            }
-                        } else {
-                            submitBtn.innerText = "正在处理视频封面...";
-                            const thumbInfo = await captureVideoThumbnail(item.file);
-                            formData.append('video', item.file);
-                            formData.append('supports_streaming', 'true');
-                            if (thumbInfo && thumbInfo.blob) {
-                                formData.append('thumbnail', thumbInfo.blob, 'thumb.jpg');
-                                formData.append('width', thumbInfo.width);
-                                formData.append('height', thumbInfo.height);
-                                formData.append('duration', thumbInfo.duration);
-                            }
-                            submitBtn.innerText = "正在上传视频...";
-                            const res = await tgUpload('sendVideo', formData);
-                            if (res.ok && !res.result.video) {
-                                tg.showAlert("这个视频的格式 Telegram 无法识别为视频，请转换成 MP4（H.264 编码）后重新上传。");
-                                submitBtn.innerText = "提交审核";
-                                submitBtn.disabled = false;
-                                return;
-                            } else if (res.ok) {
-                                mediaType = 'video';
-                                mediaItems.push(`video:${res.result.video.file_id}`);
-                            } else {
-                                tg.showAlert("视频上传失败：" + (res.description || "请检查视频格式或文件大小"));
-                                submitBtn.innerText = "提交审核";
-                                submitBtn.disabled = false;
-                                return;
-                            }
-                        }
-                    } else if (allFiles.length > 1) {
-                        submitBtn.innerText = `正在处理 ${allFiles.length} 个媒体文件...`;
-                        const formData = new FormData();
-                        formData.append('chat_id', ADMIN_ID);
-
-                        const mediaArray = [];
-                        for (let i = 0; i < allFiles.length; i++) {
-                            const item = allFiles[i];
-                            formData.append(`file${i}`, item.file);
-                            const mediaItem = { type: item.type, media: `attach://file${i}` };
-
-                            if (item.type === 'video') {
-                                const thumbInfo = await captureVideoThumbnail(item.file);
-                                if (thumbInfo && thumbInfo.blob) {
-                                    formData.append(`thumb${i}`, thumbInfo.blob, `thumb${i}.jpg`);
-                                    mediaItem.thumbnail = `attach://thumb${i}`;
-                                    mediaItem.width = thumbInfo.width;
-                                    mediaItem.height = thumbInfo.height;
-                                    mediaItem.duration = thumbInfo.duration;
-                                }
-                                mediaItem.supports_streaming = true;
-                            }
-                            mediaArray.push(mediaItem);
-                        }
-                        formData.append('media', JSON.stringify(mediaArray));
-
-                        submitBtn.innerText = `正在上传 ${allFiles.length} 个媒体文件...`;
-                        const res = await tgUpload('sendMediaGroup', formData);
-
-                        if (res.ok) {
-                            mediaType = 'group';
-                            if (res.result.length !== allFiles.length) {
-                                console.warn(`⚠️ 上传了 ${allFiles.length} 个文件，但 Telegram 只返回了 ${res.result.length} 条，可能有文件被跳过`);
-                            }
-                            res.result.forEach((msg) => {
-                                if (msg.photo && msg.photo.length > 0) {
-                                    mediaItems.push(`photo:${msg.photo[msg.photo.length - 1].file_id}`);
-                                } else if (msg.video) {
-                                    mediaItems.push(`video:${msg.video.file_id}`);
-                                } else if (msg.document) {
-                                    // Telegram 有时会把不符合"相册图片"格式要求的图片转成文件（document）返回，
-                                    // 这里也要记下来，否则这张图会在发布时凭空消失
-                                    mediaItems.push(`document:${msg.document.file_id}`);
-                                }
-                            });
-                        } else {
-                            tg.showAlert("文件上传失败：" + (res.description || "请检查文件大小或格式"));
-                            submitBtn.innerText = "提交审核";
-                            submitBtn.disabled = false;
-                            return;
-                        }
-                    } else {
+                    if (allFiles.length === 0) {
                         // 没上传任何图片/视频：出售用平台预设的默认图，房屋转租没有专属默认图，直接发纯文字
                         mediaType = selectedType === '房屋转租' ? 'none' : 'sell_default';
+                    } else {
+                        // 同样的文件已经成功上传过（上一次点提交后在后面某一步失败了）就直接复用，不再重复上传
+                        const sig = mediaSignature(allFiles);
+                        if (!(uploadCache && uploadCache.sig === sig)) {
+                            // 先传到投稿人自己的聊天里：这同时就是他的"预览"；管理员的聊天里不再出现原始上传，
+                            // 即使网络抖动导致重复上传，多出来的也只会在投稿人自己那边，不会再让管理员看到双份图片
+                            let uploadedChat = String(userId);
+                            let r = await uploadMediaTo(uploadedChat, allFiles, setStatus);
+                            if (!r.ok && r.canFallback) {
+                                // 机器人没法主动给这个人发消息（比如他没点过 /start）：退回老办法，传给第一个管理员换 file_id
+                                uploadedChat = ADMIN_ID;
+                                r = await uploadMediaTo(uploadedChat, allFiles, setStatus);
+                            }
+                            if (!r.ok) {
+                                tg.showAlert(r.message);
+                                resetBtn();
+                                return;
+                            }
+                            uploadCache = { sig, mediaType: r.mediaType, mediaItems: r.mediaItems, uploadedChat, synced: false };
+                        }
+                        mediaType = uploadCache.mediaType;
+                        mediaItems = uploadCache.mediaItems;
                     }
                 } else if (selectedType === '求购') {
                     mediaType = 'buy';
                 }
 
-                // 图片/视频已经上传给第一个管理员换到 file_id 了，现在把预览转发给其他管理员，
-                // 这样每个管理员审核的时候都能直接在聊天里看到图/视频本身，不只是文字
-                if (mediaItems.length > 0) {
-                    submitBtn.innerText = "正在同步图片给所有管理员...";
-                    await broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, ADMIN_ID);
+                // 把图片/视频同步给所有管理员（每个管理员只会收到一份；失败重试时不会重复同步）
+                if (uploadCache && mediaItems.length > 0 && !uploadCache.synced) {
+                    setStatus("正在同步图片给所有管理员...");
+                    await broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, uploadCache.uploadedChat);
+                    uploadCache.synced = true;
                 }
 
-                const addressStr = address ? ` ${address}` : '';
-                const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${t}`).join('  ')}` : '';
-                const priceStr = priceUnit ? `${price} ${priceUnit}` : price;
+                // 用户填写的内容统一转义，防止里面的 < > & 破坏消息格式导致发送失败
+                const addressStr = address ? ` ${esc(address)}` : '';
+                const tagStr = tags.length > 0 ? `\n${tags.map(t => `🏷 ${esc(t)}`).join('  ')}` : '';
+                const priceStr = priceUnit ? `${esc(price)} ${esc(priceUnit)}` : esc(price);
 
                 let formattedContent;
                 if (selectedType === '房屋转租') {
                     formattedContent =
-                        `房屋转租：${title}\n` +
+                        `房屋转租：${esc(title)}\n` +
                         `租        金：${priceStr}\n` +
-                        `位        置：#${city}${addressStr}\n` +
-                        `联系方式：${contact}\n` +
-                        `押        金：${deposit}\n` +
-                        `入住时间：${moveInTime}\n` +
-                        `介        绍：${desc || '无'}`;
+                        `位        置：#${esc(city)}${addressStr}\n` +
+                        `联系方式：${esc(contact)}\n` +
+                        `押        金：${esc(deposit)}\n` +
+                        `入住时间：${esc(moveInTime)}\n` +
+                        `介        绍：${esc(desc) || '无'}`;
                 } else {
                     const itemLabel = selectedType === '求购' ? '求购物品' : '出售物品';
                     const descLabelText = selectedType === '求购' ? '求购说明' : '物品介绍';
                     formattedContent =
-                        `${itemLabel}：${title}\n` +
+                        `${itemLabel}：${esc(title)}\n` +
                         `价        格：${priceStr}\n` +
-                        `商品类别：#${category}\n` +
-                        `位        置：#${city}${addressStr}\n` +
-                        `联系方式：${contact}\n` +
-                        `交易方式：${deliveryStr}\n` +
-                        `${descLabelText}：${desc || '无'}${tagStr}`;
+                        `商品类别：#${esc(category)}\n` +
+                        `位        置：#${esc(city)}${addressStr}\n` +
+                        `联系方式：${esc(contact)}\n` +
+                        `交易方式：${esc(deliveryStr)}\n` +
+                        `${descLabelText}：${esc(desc) || '无'}${tagStr}`;
                 }
 
                 let hiddenMediaTag = '';
@@ -1159,25 +1336,12 @@
                 }
 
                 const userName = tg.initDataUnsafe?.user?.first_name || '用户';
-                const adminText = 
+                const adminText =
                     `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
                     `${formattedContent}\n\n` +
-                    `👤 <b>投稿人：</b> ${userName} (ID: <code>${userId}</code>)`;
+                    `👤 <b>投稿人：</b> ${esc(userName)} (ID: <code>${userId}</code>)`;
 
-                const userText = 
-                    `✅ <b>投稿提交成功！</b>\n\n` +
-                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。`;
-
-                submitBtn.innerText = "正在提交审核...";
-
-                const userSendRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: userId, text: userText, parse_mode: 'HTML' })
-                }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
-                if (!userSendRes.ok) {
-                    console.error('发送给用户失败:', userSendRes);
-                }
+                setStatus("正在提交审核...");
 
                 // 挨个发给 ADMIN_IDS 里的每一个管理员（这个列表要跟 esbot.py 里的 ADMIN_IDS 保持一致，
                 // 加/删管理员时两边都要改），只要有一个发送成功就算提交成功
@@ -1195,22 +1359,10 @@
                 };
 
                 const adminResults = await Promise.all(ADMIN_IDS.map(adminId =>
-                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            chat_id: adminId,
-                            text: adminText,
-                            parse_mode: 'HTML',
-                            reply_markup: keyboardMarkup
-                        })
-                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
+                    tgJson('sendMessage', { chat_id: adminId, text: adminText, parse_mode: 'HTML', reply_markup: keyboardMarkup })
                 ));
-
                 adminResults.forEach((res, i) => {
-                    if (!res.ok) {
-                        console.error(`发送给管理员 ${ADMIN_IDS[i]} 失败:`, res);
-                    }
+                    if (!res.ok) console.error(`发送给管理员 ${ADMIN_IDS[i]} 失败:`, res);
                 });
 
                 const successfulAdmins = ADMIN_IDS
@@ -1218,34 +1370,42 @@
                     .filter(x => x.res && x.res.ok);
 
                 if (successfulAdmins.length === 0) {
+                    // 图片已经上传并同步过了（uploadCache 里有记录），再点一次提交只会重发审核卡片，不会再重复上传图片
                     tg.showAlert('提交内容已生成，但通知所有管理员都失败了：' + (adminResults[0]?.description || '未知错误') + '\n（请检查管理员是否都已在 Telegram 中与机器人开始过对话）');
-                    submitBtn.innerText = "提交审核";
-                    submitBtn.disabled = false;
+                    resetBtn();
                     return;
                 }
+                cardsDelivered = true;   // 审核卡片已经送达，从这一刻起不会再发第二份
 
-                // 成功发给了不止一个管理员的话，把"每个管理员那边分别是第几条消息"悄悄写进消息文字里
-                // （零宽字符，不影响显示），这样不管谁先点了"通过/拒绝"，机器人后端都能读出其它管理员
-                // 那边分别对应哪条消息，同步过去去掉按钮，避免几个人同时看到还能点、重复处理同一条投稿。
-                if (successfulAdmins.length > 1) {
-                    const mapStr = successfulAdmins.map(x => `${x.id}:${x.res.result.message_id}`).join(',');
-                    const adminMapTag = `<a href="https://tgadmins.app/?map=${mapStr}">&#8203;</a>`;
-                    const finalAdminText = adminMapTag + adminText;
+                // 给投稿人看的"提交成功"预览消息：带上投稿内容，以及「修改内容 / 取消投稿」按钮。
+                // 消息里悄悄藏着图片信息和"每个管理员那边的消息ID"，机器人靠它们在投稿人点按钮时同步管理员那边的审核卡片。
+                // 注意：下面这段文字的格式要和 esbot.py 里的 split_user_confirmation_text 对得上，改的时候两边一起改
+                const adminMapTag = `<a href="https://tgadmins.app/?map=${successfulAdmins.map(x => `${x.id}:${x.res.result.message_id}`).join(',')}">&#8203;</a>`;
+                const userText =
+                    `${hiddenMediaTag}${adminMapTag}✅ <b>投稿提交成功！</b>\n\n` +
+                    `${formattedContent}\n\n` +
+                    `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。\n\n` +
+                    `💡 审核通过前，您可以随时修改内容或取消投稿。`;
+                const userRes = await tgJson('sendMessage', {
+                    chat_id: userId, text: userText, parse_mode: 'HTML',
+                    reply_markup: { inline_keyboard: [[
+                        { text: "✏️ 修改内容", callback_data: `useredit|${userId}` },
+                        { text: "❌ 取消投稿", callback_data: `usercancel|${userId}` }
+                    ]] }
+                });
+                if (!userRes.ok) console.error('发送给用户失败:', userRes);
+                const userMsgId = userRes.ok ? userRes.result.message_id : null;
 
-                    await Promise.all(successfulAdmins.map(x =>
-                        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                chat_id: x.id,
-                                message_id: x.res.result.message_id,
-                                text: finalAdminText,
-                                parse_mode: 'HTML',
-                                reply_markup: keyboardMarkup
-                            })
-                        }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
-                    ));
-                }
+                // 把"管理员消息映射"和"投稿人确认消息的ID"补写进每张审核卡片（零宽标签，不影响显示）：
+                // 这样不管谁先点"通过/拒绝"，机器人都能同步其它管理员那边，并把投稿人那条消息上的按钮去掉
+                const userMsgTag = userMsgId ? `<a href="https://tgumsg.app/?m=${userMsgId}">&#8203;</a>` : '';
+                const finalAdminText = adminMapTag + userMsgTag + adminText;
+                await Promise.all(successfulAdmins.map(x =>
+                    tgJson('editMessageText', {
+                        chat_id: x.id, message_id: x.res.result.message_id,
+                        text: finalAdminText, parse_mode: 'HTML', reply_markup: keyboardMarkup
+                    })
+                ));
 
                 tg.close();
             } catch (err) {
