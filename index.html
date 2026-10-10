@@ -455,34 +455,33 @@
         // 留空 = 老办法：直接传到投稿人自己的聊天里（偶尔网络抖动时，他自己那边可能出现重复图）。
         const MEDIA_STORAGE_CHAT_ID = "-1002594231057";
 
-        // 用 file_id 把图片/视频发给某个聊天（只发这一次的媒体，不重新上传原文件，很快）。成功返回 true。
-        // 这些都是体积很小的请求，丢回复的概率远低于上传大文件；而且上层记录了"谁已经收到"，重试时不会重复发。
+        // 用 file_id 把图片/视频发给某个聊天（只发这一次的媒体，不重新上传原文件，很快）。
+        // 返回 'ok'（确认送达）/ 'unknown'（网络中断，不知道有没有送达）/ 'rejected'（Telegram 明确拒绝）。
+        // 调用方只有在 'rejected' 时才会认为"没发出去、需要重发"，'unknown' 宁可不重发，避免对方收到两份。
         async function sendAlbumByFileIds(chatId, mediaItems) {
-            if (!mediaItems || mediaItems.length === 0) return true;
+            if (!mediaItems || mediaItems.length === 0) return 'ok';
             const parse = it => { const i = it.indexOf(':'); return [it.slice(0, i), it.slice(i + 1)]; };
             const items = mediaItems.map(parse);
             // Telegram 相册里不能把"文件(document)"和图片/视频混在一起，文件单独发
             const docs = items.filter(([p]) => p === 'document');
             const rest = items.filter(([p]) => p !== 'document');
-            let allOk = true;
+            const results = [];
             if (rest.length === 1) {
                 const [p, id] = rest[0];
-                const r = p === 'video'
+                results.push(p === 'video'
                     ? await tgJson('sendVideo', { chat_id: chatId, video: id, supports_streaming: true })
-                    : await tgJson('sendPhoto', { chat_id: chatId, photo: id });
-                allOk = allOk && !!r.ok;
+                    : await tgJson('sendPhoto', { chat_id: chatId, photo: id }));
             } else if (rest.length > 1) {
                 const media = rest.map(([p, id]) => p === 'video'
                     ? { type: 'video', media: id, supports_streaming: true }
                     : { type: 'photo', media: id });
-                const r = await tgJson('sendMediaGroup', { chat_id: chatId, media });
-                allOk = allOk && !!r.ok;
+                results.push(await tgJson('sendMediaGroup', { chat_id: chatId, media }));
             }
             for (const [, id] of docs) {
-                const r = await tgJson('sendDocument', { chat_id: chatId, document: id });
-                allOk = allOk && !!r.ok;
+                results.push(await tgJson('sendDocument', { chat_id: chatId, document: id }));
             }
-            return allOk;
+            if (results.some(r => r.network)) return 'unknown';
+            return results.every(r => r.ok) ? 'ok' : 'rejected';
         }
 
         // ========== 上传辅助：超时 + 失败自动重试一次 + 错误分类 ==========
@@ -523,13 +522,21 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        // 发普通（JSON）请求：网络失败也不抛错，统一返回 { ok:false, description }，由调用方决定怎么处理
-        function tgJson(method, payload) {
+        // 发普通（JSON）请求：网络失败也不抛错，统一返回对象，由调用方决定怎么处理：
+        //   成功               -> { ok:true, result }
+        //   Telegram 明确拒绝   -> { ok:false, description }          （一定没发出去）
+        //   网络中断/超时/回复读不出来 -> { ok:false, network:true }    （不知道对方有没有收到！）
+        // 第三种最危险：请求可能已经到了 Telegram、只是回复丢了，这时候再发一次就会让对方收到两份。
+        function tgJson(method, payload, timeoutMs = 30000) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
             return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
+                body: JSON.stringify(payload),
+                signal: ctrl.signal
+            }).then(r => r.json()).catch(e => ({ ok: false, network: true, description: String(e) }))
+              .finally(() => clearTimeout(timer));
         }
 
         // ========== 防重复提交 ==========
@@ -538,6 +545,7 @@
         // 同一批文件重试时直接复用，不再重新上传、也不再重复同步给管理员；审核卡片送达后（cardsDelivered）更不会再发第二份。
         let uploadCache = null;      // { sig, mediaType, mediaItems, uploadedChat, synced }
         let cardsDelivered = false;
+        let deliveryState = null;    // { key, no, cards:{管理员ID:{status,msgId}}, uncertain, resend }：每位管理员的送达情况，见提交流程里的说明
         const CANNOT_DM_RE = /can't initiate|chat not found|forbidden|blocked|deactivated|peer_id_invalid|not a member|not enough rights|have no rights|write_forbidden/i;
         // 只有传到"素材中转聊天"才自动重试（那里出现重复图没人看得见）；传到真人聊天时不重试，避免回复丢失后产生可见的重复图
         const uploadRetriesFor = (chatId) => (MEDIA_STORAGE_CHAT_ID && String(chatId) === String(MEDIA_STORAGE_CHAT_ID)) ? UPLOAD_RETRIES : 0;
@@ -1289,11 +1297,18 @@
                     hiddenMediaTag = `<a href="https://tgmedia.app/?type=${mediaType}${idsParam}">&#8203;</a>`;
                 }
 
+                // 同一份内容（同样的文字 + 同样的图片）在整个提交过程里共用一个"单号"，写在审核卡片最后一行。
+                // 万一网络波动让管理员收到了重复的卡片，一眼就能看出单号一样 = 同一份投稿；机器人也靠它挡住重复发布。
+                const deliveryKey = [selectedType, userId, uploadCache ? uploadCache.sig : '', formattedContent].join('|');
+                if (!deliveryState || deliveryState.key !== deliveryKey) {
+                    deliveryState = { key: deliveryKey, no: Math.random().toString(16).slice(2, 10).padEnd(8, '0'), cards: {}, uncertain: false, resend: false };
+                }
+
                 const userName = tg.initDataUnsafe?.user?.first_name || '用户';
                 const adminText =
                     `${hiddenMediaTag}🆕 <b>收到新的【${selectedType}】投稿等待审核：</b>\n\n` +
                     `${formattedContent}\n\n` +
-                    `👤 <b>投稿人：</b> ${esc(userName)} (ID: <code>${userId}</code>)`;
+                    `👤 <b>投稿人：</b> ${esc(userName)} (ID: <code>${userId}</code>) · 单号 <code>${deliveryState.no}</code>`;
 
                 setStatus("正在提交审核...");
 
@@ -1312,24 +1327,43 @@
                     ]
                 };
 
-                const adminResults = await Promise.all(ADMIN_IDS.map(async adminId => {
-                    // 先给这位管理员发图片/视频（已经收到过的不重复发），紧接着发审核卡片
-                    if (mediaItems.length > 0 && !albumSent.has(String(adminId))) {
-                        if (await sendAlbumByFileIds(adminId, mediaItems)) albumSent.add(String(adminId));
+                // 每位管理员的送达状态记在 deliveryState.cards 里：
+                //   ok = Telegram 确认收到；rejected = Telegram 明确拒绝；unknown = 网络中断/超时，不知道对方有没有收到。
+                // 状态是 unknown 时默认不重发——请求很可能已经到了、只是回复丢了，重发会让管理员收到两份（Telegram 没有防重复机制）。
+                const cards = deliveryState.cards;
+                if (deliveryState.uncertain) { deliveryState.resend = true; deliveryState.uncertain = false; }   // 用户看过提示后又点了提交，视为"确认要重发"
+                await Promise.all(ADMIN_IDS.map(async adminId => {
+                    const id = String(adminId);
+                    const prev = cards[id];
+                    if (prev && prev.status === 'ok') return;
+                    if (prev && prev.status === 'unknown' && !deliveryState.resend) return;
+                    // 先给这位管理员发图片/视频（已经收到过或结果不确定的不重复发），紧接着发审核卡片
+                    if (mediaItems.length > 0 && !albumSent.has(id)) {
+                        if (await sendAlbumByFileIds(adminId, mediaItems) !== 'rejected') albumSent.add(id);
                     }
-                    return tgJson('sendMessage', { chat_id: adminId, text: adminText, parse_mode: 'HTML', reply_markup: keyboardMarkup });
+                    const res = await tgJson('sendMessage', { chat_id: adminId, text: adminText, parse_mode: 'HTML', reply_markup: keyboardMarkup });
+                    if (res.ok) cards[id] = { status: 'ok', msgId: res.result.message_id };
+                    else if (res.network) cards[id] = { status: 'unknown' };
+                    else cards[id] = { status: 'rejected', description: res.description };
+                    if (!res.ok) console.error(`发送给管理员 ${id} 失败:`, res);
                 }));
-                adminResults.forEach((res, i) => {
-                    if (!res.ok) console.error(`发送给管理员 ${ADMIN_IDS[i]} 失败:`, res);
-                });
+                deliveryState.resend = false;
 
                 const successfulAdmins = ADMIN_IDS
-                    .map((id, i) => ({ id, res: adminResults[i] }))
-                    .filter(x => x.res && x.res.ok);
+                    .map(id => ({ id, c: cards[String(id)] }))
+                    .filter(x => x.c && x.c.status === 'ok');
+                const unknownCount = ADMIN_IDS.filter(id => cards[String(id)] && cards[String(id)].status === 'unknown').length;
 
                 if (successfulAdmins.length === 0) {
-                    // 图片已经上传并同步过了（uploadCache 里有记录），再点一次提交只会重发审核卡片，不会再重复上传图片
-                    tg.showAlert('提交内容已生成，但通知所有管理员都失败了：' + (adminResults[0]?.description || '未知错误') + '\n（请检查管理员是否都已在 Telegram 中与机器人开始过对话）');
+                    if (unknownCount > 0) {
+                        // 请求发出去了但没拿到回复：管理员可能已经收到了。这时候不能擅自重发，交给用户决定
+                        deliveryState.uncertain = true;
+                        tg.showAlert('网络不稳定，提交结果不确定：管理员可能已经收到了。\n请稍等片刻；如果管理员一直没有处理，再点一次「提交审核」重试（重试可能会让管理员收到重复投稿）。');
+                    } else {
+                        // 图片已经上传并同步过了（uploadCache 里有记录），再点一次提交只会重发审核卡片，不会再重复上传图片
+                        const rej = ADMIN_IDS.map(id => cards[String(id)]).find(c => c && c.description);
+                        tg.showAlert('提交内容已生成，但通知所有管理员都失败了：' + (rej ? rej.description : '未知错误') + '\n（请检查管理员是否都已在 Telegram 中与机器人开始过对话）');
+                    }
                     resetBtn();
                     return;
                 }
@@ -1337,22 +1371,21 @@
 
                 // 投稿人的图片/视频预览：上传到了他自己的聊天就已经有了；用了素材中转聊天的话，这里用 file_id 发给他一份（只发一次）
                 if (mediaItems.length > 0 && !albumSent.has(String(userId))) {
-                    if (await sendAlbumByFileIds(userId, mediaItems)) albumSent.add(String(userId));
+                    if (await sendAlbumByFileIds(userId, mediaItems) !== 'rejected') albumSent.add(String(userId));
                 }
 
-                // 给投稿人看的"提交成功"预览消息：带上投稿内容，以及「修改内容 / 取消投稿」按钮。
+                // 给投稿人看的"提交成功"预览消息：带上投稿内容，以及「取消投稿」按钮。
                 // 消息里悄悄藏着图片信息和"每个管理员那边的消息ID"，机器人靠它们在投稿人点按钮时同步管理员那边的审核卡片。
                 // 注意：下面这段文字的格式要和 esbot.py 里的 split_user_confirmation_text 对得上，改的时候两边一起改
-                const adminMapTag = `<a href="https://tgadmins.app/?map=${successfulAdmins.map(x => `${x.id}:${x.res.result.message_id}`).join(',')}">&#8203;</a>`;
+                const adminMapTag = `<a href="https://tgadmins.app/?map=${successfulAdmins.map(x => `${x.id}:${x.c.msgId}`).join(',')}">&#8203;</a>`;
                 const userText =
                     `${hiddenMediaTag}${adminMapTag}✅ <b>投稿提交成功！</b>\n\n` +
                     `${formattedContent}\n\n` +
                     `您的【${selectedType}】信息已提交审核，通过后将自动发布到频道 @qqqwww9。\n\n` +
-                    `💡 审核通过前，您可以随时修改内容或取消投稿。`;
+                    `💡 审核通过前，您可以随时取消投稿（如需修改，请取消后重新提交）。`;
                 const userRes = await tgJson('sendMessage', {
                     chat_id: userId, text: userText, parse_mode: 'HTML',
                     reply_markup: { inline_keyboard: [[
-                        { text: "✏️ 修改内容", callback_data: `useredit|${userId}` },
                         { text: "❌ 取消投稿", callback_data: `usercancel|${userId}` }
                     ]] }
                 });
@@ -1363,12 +1396,11 @@
                 // 这样不管谁先点"通过/拒绝"，机器人都能同步其它管理员那边，并把投稿人那条消息上的按钮去掉
                 const userMsgTag = userMsgId ? `<a href="https://tgumsg.app/?m=${userMsgId}">&#8203;</a>` : '';
                 const finalAdminText = adminMapTag + userMsgTag + adminText;
-                await Promise.all(successfulAdmins.map(x =>
-                    tgJson('editMessageText', {
-                        chat_id: x.id, message_id: x.res.result.message_id,
-                        text: finalAdminText, parse_mode: 'HTML', reply_markup: keyboardMarkup
-                    })
-                ));
+                await Promise.all(successfulAdmins.map(async x => {
+                    const payload = { chat_id: x.id, message_id: x.c.msgId, text: finalAdminText, parse_mode: 'HTML', reply_markup: keyboardMarkup };
+                    const r = await tgJson('editMessageText', payload);
+                    if (!r.ok && r.network) await tgJson('editMessageText', payload);   // 编辑同样的内容可以放心重试，不会产生重复消息
+                }));
 
                 tg.close();
             } catch (err) {
