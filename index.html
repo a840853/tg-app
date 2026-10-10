@@ -243,7 +243,7 @@
         .drop-overlay-box small { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-top: 6px; }
         /* 已上传图片：拖拽换位置 */
         .preview-item { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
-        .preview-item img { -webkit-user-drag: none; pointer-events: none; }
+        .preview-item img, .preview-item video { -webkit-user-drag: none; pointer-events: none; }
         .preview-item.dragging { opacity: 0.3; }
         .preview-item.drop-target { outline: 2px solid var(--coral); outline-offset: -2px; transform: scale(0.94); }
         .preview-item .cover-badge {
@@ -260,7 +260,7 @@
 </head>
 <body>
     <div class="drop-overlay" id="dropOverlay">
-        <div class="drop-overlay-box"><span id="dropOverlayText">📥 松开鼠标，上传图片 / 视频</span><small id="dropOverlaySub">图片最多 9 张（单张 10MB 内），视频 1 个（50MB 内）</small></div>
+        <div class="drop-overlay-box"><span id="dropOverlayText">📥 松开鼠标，上传图片 / 视频</span><small id="dropOverlaySub">图片和视频合计最多 10 个（图片单张 10MB 内，视频 1 个且 50MB 内）</small></div>
     </div>
     <div class="hero">
         <h1>发布商品</h1>
@@ -278,23 +278,13 @@
     <div class="card" id="mediaContainer">
         <div class="card-title"><span class="badge-icon">📷</span><span id="mediaCardTitle">商品图片与视频</span></div>
         <div class="form-group">
-            <label><span id="mediaLabel">商品图片</span>（第一张为封面，最多9张）</label>
-            <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageSelect(event)">
+            <label><span id="mediaLabel">商品图片与视频</span>（第一个为封面，最多 10 个；视频限 1 个、50MB 以内）</label>
+            <input type="file" id="mediaInput" accept="image/*,video/*" multiple style="display:none;" onchange="handleMediaSelect(event)">
             <div class="media-grid" id="imagePreviewGrid"></div>
-            <p class="reorder-hint" id="reorderHint" style="display:none;">💡 按住图片拖动，可以调整顺序（和另一张交换位置）</p>
-            <div class="upload-box" id="imageUploadBox" onclick="triggerImageInput()" style="margin-top: 8px;">
+            <p class="reorder-hint" id="reorderHint" style="display:none;">💡 按住图片 / 视频拖动，可以调整顺序（和另一个交换位置）</p>
+            <div class="upload-box" id="imageUploadBox" onclick="triggerMediaInput()" style="margin-top: 8px;">
                 <span>+</span>
-                <span>添加图片</span>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label>视频（可选，1个，限制50MB以内）</label>
-            <input type="file" id="videoInput" accept="video/mp4,video/mov,video/quicktime,video/*" style="display:none;" onchange="handleVideoSelect(event)">
-            <div class="media-grid" id="videoPreviewContainer"></div>
-            <div class="upload-box" id="videoUploadBox" onclick="triggerVideoInput()" style="margin-top: 8px;">
-                <span>+</span>
-                <span>添加视频</span>
+                <span>添加图片 / 视频</span>
             </div>
         </div>
 
@@ -458,43 +448,41 @@
         const ADMIN_ID = "7446549590";  // 只用于上传图片/视频换 file_id 这一步，任选一个已经和机器人对话过的管理员即可
         const ADMIN_IDS = ["7446549590", "7906586728", "8536124380"];  // 审核消息实际广播给的管理员列表
 
-        // 图片/视频只上传一次（现在是先传到投稿人自己的聊天里换到 file_id，这同时就是给投稿人看的预览），
-        // 换到 file_id 之后，转发给所有管理员（primaryAdminId 是上传的那个聊天，已经有了就不重复发）。
-        // 不需要再重新上传原始文件——直接拿这个 file_id 调用 send 接口就行，快很多。
-        async function broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, primaryAdminId) {
-            const others = ADMIN_IDS.filter(id => id !== primaryAdminId);
-            if (others.length === 0 || mediaItems.length === 0) return;
+        // 【素材中转聊天】强烈建议配置：填一个只有机器人在里面的私有频道/群的 ID（形如 "-1001234567890"）。
+        // 图片/视频会先上传到这里换成 file_id，之后再由程序"恰好一次"地发给各位管理员和投稿人。
+        // 好处：上传这一步网络抖动、回复丢失导致重复上传时，多出来的重复图只会留在这个没人看的聊天里，
+        // 管理员和用户都不会再收到重复的图。获取 ID 的方法：把机器人设为这个频道的管理员，然后在里面发送 /chatid。
+        // 留空 = 老办法：直接传到投稿人自己的聊天里（偶尔网络抖动时，他自己那边可能出现重复图）。
+        const MEDIA_STORAGE_CHAT_ID = "";
 
-            if (mediaItems.length === 1) {
-                const [typePrefix, fileId] = mediaItems[0].split(':');
-                const isVideo = typePrefix === 'video';
-                const isDoc = typePrefix === 'document';
-                const endpoint = isVideo ? 'sendVideo' : (isDoc ? 'sendDocument' : 'sendPhoto');
-                const body = isVideo
-                    ? { chat_id: null, video: fileId, supports_streaming: true }
-                    : (isDoc ? { chat_id: null, document: fileId } : { chat_id: null, photo: fileId });
-                await Promise.all(others.map(adminId => {
-                    const payload = { ...body, chat_id: adminId };
-                    return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }));
-                }));
-            } else {
-                const mediaArray = mediaItems.map(item => {
-                    const [typePrefix, fileId] = item.split(':');
-                    const type = typePrefix === 'video' ? 'video' : (typePrefix === 'document' ? 'document' : 'photo');
-                    return { type, media: fileId };
-                });
-                await Promise.all(others.map(adminId =>
-                    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMediaGroup`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ chat_id: adminId, media: mediaArray })
-                    }).then(r => r.json()).catch(e => ({ ok: false, description: String(e) }))
-                ));
+        // 用 file_id 把图片/视频发给某个聊天（只发这一次的媒体，不重新上传原文件，很快）。成功返回 true。
+        // 这些都是体积很小的请求，丢回复的概率远低于上传大文件；而且上层记录了"谁已经收到"，重试时不会重复发。
+        async function sendAlbumByFileIds(chatId, mediaItems) {
+            if (!mediaItems || mediaItems.length === 0) return true;
+            const parse = it => { const i = it.indexOf(':'); return [it.slice(0, i), it.slice(i + 1)]; };
+            const items = mediaItems.map(parse);
+            // Telegram 相册里不能把"文件(document)"和图片/视频混在一起，文件单独发
+            const docs = items.filter(([p]) => p === 'document');
+            const rest = items.filter(([p]) => p !== 'document');
+            let allOk = true;
+            if (rest.length === 1) {
+                const [p, id] = rest[0];
+                const r = p === 'video'
+                    ? await tgJson('sendVideo', { chat_id: chatId, video: id, supports_streaming: true })
+                    : await tgJson('sendPhoto', { chat_id: chatId, photo: id });
+                allOk = allOk && !!r.ok;
+            } else if (rest.length > 1) {
+                const media = rest.map(([p, id]) => p === 'video'
+                    ? { type: 'video', media: id, supports_streaming: true }
+                    : { type: 'photo', media: id });
+                const r = await tgJson('sendMediaGroup', { chat_id: chatId, media });
+                allOk = allOk && !!r.ok;
             }
+            for (const [, id] of docs) {
+                const r = await tgJson('sendDocument', { chat_id: chatId, document: id });
+                allOk = allOk && !!r.ok;
+            }
+            return allOk;
         }
 
         // ========== 上传辅助：超时 + 失败自动重试一次 + 错误分类 ==========
@@ -504,11 +492,11 @@
         const UPLOAD_RETRIES = 1;           // 失败后自动再试 1 次
         function makeUploadError(code, detail) { const e = new Error(detail || code); e.code = code; return e; }
 
-        async function tgUpload(method, formData) {
+        async function tgUpload(method, formData, retries = UPLOAD_RETRIES) {
             const url = `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
             const btn = document.getElementById('submitBtn');
             let lastErr;
-            for (let attempt = 0; attempt <= UPLOAD_RETRIES; attempt++) {
+            for (let attempt = 0; attempt <= retries; attempt++) {
                 const ctrl = new AbortController();
                 const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
                 try {
@@ -523,7 +511,7 @@
                 } finally {
                     clearTimeout(timer);
                 }
-                if (attempt < UPLOAD_RETRIES) {
+                if (attempt < retries) {
                     btn.innerText = "网络不稳，正在重试...";
                     await new Promise(r => setTimeout(r, 1500));
                 }
@@ -550,7 +538,9 @@
         // 同一批文件重试时直接复用，不再重新上传、也不再重复同步给管理员；审核卡片送达后（cardsDelivered）更不会再发第二份。
         let uploadCache = null;      // { sig, mediaType, mediaItems, uploadedChat, synced }
         let cardsDelivered = false;
-        const CANNOT_DM_RE = /can't initiate|chat not found|forbidden|blocked|deactivated|peer_id_invalid/i;
+        const CANNOT_DM_RE = /can't initiate|chat not found|forbidden|blocked|deactivated|peer_id_invalid|not a member|not enough rights|have no rights|write_forbidden/i;
+        // 只有传到"素材中转聊天"才自动重试（那里出现重复图没人看得见）；传到真人聊天时不重试，避免回复丢失后产生可见的重复图
+        const uploadRetriesFor = (chatId) => (MEDIA_STORAGE_CHAT_ID && String(chatId) === String(MEDIA_STORAGE_CHAT_ID)) ? UPLOAD_RETRIES : 0;
 
         function mediaSignature(allFiles) {
             return selectedType + '|' + allFiles.map(f => `${f.type}:${f.file.name}:${f.file.size}:${f.file.lastModified || 0}`).join('|');
@@ -568,7 +558,7 @@
                 if (item.type === 'photo') {
                     setStatus("正在上传图片...");
                     formData.append('photo', item.file);
-                    const res = await tgUpload('sendPhoto', formData);
+                    const res = await tgUpload('sendPhoto', formData, uploadRetriesFor(chatId));
                     if (!res.ok) return fail("图片上传失败：" + (res.description || "未知错误"), res.description);
                     if (res.result.photo && res.result.photo.length > 0) {
                         return { ok: true, mediaType: 'photo', mediaItems: [`photo:${res.result.photo.pop().file_id}`] };
@@ -591,7 +581,7 @@
                     formData.append('duration', thumbInfo.duration);
                 }
                 setStatus("正在上传视频...");
-                const res = await tgUpload('sendVideo', formData);
+                const res = await tgUpload('sendVideo', formData, uploadRetriesFor(chatId));
                 if (!res.ok) return fail("视频上传失败：" + (res.description || "请检查视频格式或文件大小"), res.description);
                 if (!res.result.video) return fail("这个视频的格式 Telegram 无法识别为视频，请转换成 MP4（H.264 编码）后重新上传。");
                 return { ok: true, mediaType: 'video', mediaItems: [`video:${res.result.video.file_id}`] };
@@ -620,7 +610,7 @@
             }
             formData.append('media', JSON.stringify(mediaArray));
             setStatus(`正在上传 ${allFiles.length} 个媒体文件...`);
-            const res = await tgUpload('sendMediaGroup', formData);
+            const res = await tgUpload('sendMediaGroup', formData, uploadRetriesFor(chatId));
             if (!res.ok) return fail("文件上传失败：" + (res.description || "请检查文件大小或格式"), res.description);
             if (res.result.length !== allFiles.length) {
                 console.warn(`⚠️ 上传了 ${allFiles.length} 个文件，但 Telegram 只返回了 ${res.result.length} 条，可能有文件被跳过`);
@@ -652,8 +642,12 @@
         // ========== 上传辅助结束 ==========
 
         let selectedType = '出售';
-        let selectedImages = [];
-        let selectedVideo = null;
+        // 图片和视频放在同一个列表里，顺序就是发布时的顺序（第一个是封面）：[{ kind: 'photo' | 'video', file }]
+        let selectedMedia = [];
+        const MEDIA_MAX_COUNT = 10;                       // Telegram 相册上限
+        const MEDIA_MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 单张图片
+        const MEDIA_MAX_VIDEO_BYTES = 50 * 1024 * 1024;   // 视频（机器人上传限制）
+        const MEDIA_MAX_VIDEOS = 1;
 
         function selectType(type, el) {
             selectedType = type;
@@ -692,7 +686,7 @@
                 categoryCard.style.display = 'none';
                 priceLabel.textContent = '租金';
                 titleLabel.textContent = '标题';
-                mediaLabel.textContent = '房屋图片';
+                mediaLabel.textContent = '房屋图片与视频';
                 mediaCardTitle.innerHTML = '房屋图片与视频 <span class="req-star">*</span>';
                 descLabel.textContent = '房屋介绍';
                 descInput.placeholder = '补充说明：房屋朝向、周边环境、看房时间等...';
@@ -705,7 +699,7 @@
                 categoryCard.style.display = 'block';
                 priceLabel.textContent = '价格';
                 titleLabel.textContent = '物品名称';
-                mediaLabel.textContent = '商品图片';
+                mediaLabel.textContent = '商品图片与视频';
                 mediaCardTitle.textContent = '商品图片与视频';
                 descLabel.textContent = '物品介绍';
                 descInput.placeholder = '补充说明：具体型号、使用情况、购买时间等...';
@@ -755,12 +749,12 @@
             this.value = normalizeContact(this.value);
         });
 
-        function triggerImageInput() {
-            if (selectedImages.length >= 9) {
-                tg.showAlert('最多上传 9 张图片');
+        function triggerMediaInput() {
+            if (selectedMedia.length >= MEDIA_MAX_COUNT) {
+                tg.showAlert(`最多添加 ${MEDIA_MAX_COUNT} 个图片 / 视频`);
                 return;
             }
-            document.getElementById('imageInput').click();
+            document.getElementById('mediaInput').click();
         }
 
         // Telegram 对图片有硬性要求：宽+高不能超过10000像素，长边不能超过短边的20倍（比如特别长的截图）。
@@ -847,37 +841,55 @@
             });
         }
 
-        // 添加图片的统一入口：点按钮选图 和 拖拽上传 都走这里，规则（最多9张、单张10MB）保持一致。
+        // 添加图片/视频的统一入口：点按钮选择 和 拖拽上传 都走这里，图片和视频在同一个窗口里一起处理，规则保持一致：
+        // 合计最多 10 个、图片单张 10MB 内、视频 1 个且 50MB 内。
         // 返回需要提示用户的信息列表，由调用方合并成一次弹窗（连续弹多个窗口 Telegram 会报错）
-        async function addImageFiles(files) {
-            const msgs = [];
+        async function addMediaFiles(files) {
+            const msgs = new Set();
+            let unsupported = 0;
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                if (selectedImages.length >= 9) {
-                    msgs.push('最多上传 9 张图片，多出来的已忽略');
+                const isImg = isImageFile(file);
+                const isVid = !isImg && isVideoFile(file);
+                if (!isImg && !isVid) { unsupported++; continue; }
+                if (selectedMedia.length >= MEDIA_MAX_COUNT) {
+                    msgs.add(`图片和视频合计最多 ${MEDIA_MAX_COUNT} 个，多出来的已忽略`);
                     break;
                 }
-                if (file.size > 10 * 1024 * 1024) {
-                    msgs.push(`图片 [${file.name}] 超过 10MB，已被跳过`);
-                    continue;
+                if (isVid) {
+                    if (selectedMedia.filter(m => m.kind === 'video').length >= MEDIA_MAX_VIDEOS) {
+                        msgs.add('视频只能添加 1 个，多出来的已忽略');
+                        continue;
+                    }
+                    if (file.size > MEDIA_MAX_VIDEO_BYTES) {
+                        msgs.add(`视频 [${file.name}] 超过 50MB，请压缩后再试`);
+                        continue;
+                    }
+                    selectedMedia.push({ kind: 'video', file });
+                } else {
+                    if (file.size > MEDIA_MAX_IMAGE_BYTES) {
+                        msgs.add(`图片 [${file.name}] 超过 10MB，已被跳过`);
+                        continue;
+                    }
+                    const fixed = await sanitizeImageFile(file);
+                    selectedMedia.push({ kind: 'photo', file: fixed });
                 }
-                const fixed = await sanitizeImageFile(file);
-                selectedImages.push(fixed);
             }
-            renderImagePreviews();
-            return msgs;
+            if (unsupported > 0) msgs.add(`有 ${unsupported} 个文件不是图片或视频，已忽略`);
+            renderMediaPreviews();
+            return Array.from(msgs);
         }
 
-        async function handleImageSelect(e) {
+        async function handleMediaSelect(e) {
             const files = Array.from(e.target.files);
             e.target.value = '';
-            const msgs = await addImageFiles(files);
+            const msgs = await addMediaFiles(files);
             if (msgs.length) tg.showAlert(msgs.join('\n'));
         }
 
-        function removeImage(index) {
-            selectedImages.splice(index, 1);
-            renderImagePreviews();
+        function removeMedia(index) {
+            selectedMedia.splice(index, 1);
+            renderMediaPreviews();
         }
 
         // 每个 File 只生成一次预览地址，反复刷新（比如拖拽换位置）时复用，不重复创建、也不闪烁
@@ -888,32 +900,47 @@
             return url;
         }
 
-        function renderImagePreviews() {
+        function renderMediaPreviews() {
             const container = document.getElementById('imagePreviewGrid');
             container.innerHTML = '';
-            selectedImages.forEach((file, index) => {
+            selectedMedia.forEach((item, index) => {
                 const div = document.createElement('div');
                 div.className = 'preview-item';
-                const img = document.createElement('img');
-                img.src = imageUrlFor(file);
-                img.draggable = false;
-                const removeBtn = document.createElement('div');
-                removeBtn.className = 'remove-btn';
-                removeBtn.innerText = '×';
-                removeBtn.onclick = (e) => { e.stopPropagation(); removeImage(index); };
-                div.appendChild(img);
+                if (item.kind === 'video') {
+                    const video = document.createElement('video');
+                    video.src = imageUrlFor(item.file);
+                    video.setAttribute('playsinline', '');
+                    video.muted = true;
+                    video.setAttribute('muted', '');
+                    video.setAttribute('autoplay', '');
+                    video.loop = true;
+                    div.appendChild(video);
+                    const vb = document.createElement('div');
+                    vb.className = 'video-badge';
+                    vb.innerText = '🎬 视频';
+                    div.appendChild(vb);
+                } else {
+                    const img = document.createElement('img');
+                    img.src = imageUrlFor(item.file);
+                    img.draggable = false;
+                    div.appendChild(img);
+                }
                 if (index === 0) {
                     const badge = document.createElement('div');
                     badge.className = 'cover-badge';
                     badge.innerText = '封面';
                     div.appendChild(badge);
                 }
+                const removeBtn = document.createElement('div');
+                removeBtn.className = 'remove-btn';
+                removeBtn.innerText = '×';
+                removeBtn.onclick = (e) => { e.stopPropagation(); removeMedia(index); };
                 div.appendChild(removeBtn);
                 div.addEventListener('pointerdown', (e) => startImageDrag(e, div, index));
                 container.appendChild(div);
             });
-            document.getElementById('imageUploadBox').style.display = selectedImages.length >= 9 ? 'none' : 'flex';
-            document.getElementById('reorderHint').style.display = selectedImages.length >= 2 ? 'block' : 'none';
+            document.getElementById('imageUploadBox').style.display = selectedMedia.length >= MEDIA_MAX_COUNT ? 'none' : 'flex';
+            document.getElementById('reorderHint').style.display = selectedMedia.length >= 2 ? 'block' : 'none';
         }
 
         // ========== 已上传图片：拖拽交换位置 ==========
@@ -923,12 +950,12 @@
         const DRAG_MOVE_THRESHOLD = 6;
         let imageDrag = null;
 
-        function swapImages(i, j) {
-            if (i === j || i < 0 || j < 0 || i >= selectedImages.length || j >= selectedImages.length) return;
-            const tmp = selectedImages[i];
-            selectedImages[i] = selectedImages[j];
-            selectedImages[j] = tmp;
-            renderImagePreviews();
+        function swapMedia(i, j) {
+            if (i === j || i < 0 || j < 0 || i >= selectedMedia.length || j >= selectedMedia.length) return;
+            const tmp = selectedMedia[i];
+            selectedMedia[i] = selectedMedia[j];
+            selectedMedia[j] = tmp;
+            renderMediaPreviews();
         }
 
         function haptic() { try { tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light'); } catch (e) {} }
@@ -1011,7 +1038,7 @@
             const doSwap = d.active && d.over >= 0;
             const from = d.index, to = d.over;
             cleanupImageDrag();
-            if (doSwap) { swapImages(from, to); haptic(); }
+            if (doSwap) { swapMedia(from, to); haptic(); }
         }
 
         function cancelImageDrag(e) {
@@ -1036,29 +1063,6 @@
         document.addEventListener('touchmove', (e) => { if (imageDrag && imageDrag.active) e.preventDefault(); }, { passive: false });
         // ========== 拖拽交换位置结束 ==========
 
-        function triggerVideoInput() {
-            document.getElementById('videoInput').click();
-        }
-
-        // 设置视频的统一入口（选择文件 / 拖拽共用）；成功返回 null，失败返回要提示用户的文字
-        function setVideoFile(file) {
-            if (file.size > 50 * 1024 * 1024) {
-                return '视频不能超过 50MB！请压缩后再试。';
-            }
-            selectedVideo = file;
-            renderVideoPreview();
-            return null;
-        }
-
-        function handleVideoSelect(e) {
-            const file = e.target.files[0];
-            e.target.value = '';
-            if (file) {
-                const msg = setVideoFile(file);
-                if (msg) tg.showAlert(msg);
-            }
-        }
-
         // ========== 拖拽上传：把图片/视频文件直接拖进窗口 ==========
         // 注意：只有电脑端（Telegram Desktop 等）能拖文件，手机上没有这个操作，照常点按钮选择即可。
         const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i;
@@ -1071,17 +1075,7 @@
                 tg.showAlert('求购投稿不需要上传图片或视频。如需上传，请先切换到「出售」或「转租」。');
                 return;
             }
-            const images = files.filter(isImageFile);
-            const videos = files.filter(f => !isImageFile(f) && isVideoFile(f));
-            const ignored = files.length - images.length - videos.length;
-            const msgs = [];
-            if (images.length) msgs.push(...await addImageFiles(images));
-            if (videos.length) {
-                if (videos.length > 1) msgs.push('视频只能上传 1 个，已使用第一个');
-                const err = setVideoFile(videos[0]);   // 已有视频时，新拖进来的会替换旧的
-                if (err) msgs.push(err);
-            }
-            if (ignored > 0) msgs.push(`有 ${ignored} 个文件不是图片或视频，已忽略`);
+            const msgs = await addMediaFiles(files);
             if (msgs.length) tg.showAlert(msgs.join('\n'));
         }
 
@@ -1098,7 +1092,7 @@
                     subEl.textContent = '如需上传，请先切换到「出售」或「转租」';
                 } else {
                     textEl.textContent = '📥 松开鼠标，上传图片 / 视频';
-                    subEl.textContent = '图片最多 9 张（单张 10MB 内），视频 1 个（50MB 内）';
+                    subEl.textContent = '图片和视频合计最多 10 个（图片单张 10MB 内，视频 1 个且 50MB 内）';
                 }
                 overlay.classList.add('show');
             }
@@ -1117,45 +1111,6 @@
             window.addEventListener('dragend', hide);
         })();
         // ========== 拖拽上传结束 ==========
-
-        function removeVideo() {
-            selectedVideo = null;
-            renderVideoPreview();
-        }
-
-        function renderVideoPreview() {
-            const container = document.getElementById('videoPreviewContainer');
-            container.innerHTML = '';
-            const uploadBox = document.getElementById('videoUploadBox');
-            if (selectedVideo) {
-                uploadBox.style.display = 'none';
-                const div = document.createElement('div');
-                div.className = 'preview-item';
-
-                const video = document.createElement('video');
-                video.src = URL.createObjectURL(selectedVideo);
-                video.setAttribute('playsinline', '');
-                video.setAttribute('muted', '');
-                video.setAttribute('autoplay', '');
-                video.loop = true;
-
-                const badge = document.createElement('div');
-                badge.className = 'video-badge';
-                badge.innerText = '🎬 视频';
-
-                const removeBtn = document.createElement('div');
-                removeBtn.className = 'remove-btn';
-                removeBtn.innerText = '×';
-                removeBtn.onclick = (e) => { e.stopPropagation(); removeVideo(); };
-
-                div.appendChild(video);
-                div.appendChild(badge);
-                div.appendChild(removeBtn);
-                container.appendChild(div);
-            } else {
-                uploadBox.style.display = 'flex';
-            }
-        }
 
         // 抓取视频第一帧作为封面图，并读取宽高/时长一并传给 Telegram，
         // 这样封面和点开播放后看到的画面是同一帧，衔接更顺滑，也避免全黑封面的问题
@@ -1233,7 +1188,7 @@
                 return;
             }
 
-            if (isRent && selectedImages.length === 0 && !selectedVideo) {
+            if (isRent && selectedMedia.length === 0) {
                 tg.showAlert('房屋转租请至少上传一张图片或一个视频！');
                 return;
             }
@@ -1254,11 +1209,10 @@
                 let mediaItems = [];
 
                 if (selectedType === '出售' || selectedType === '房屋转租') {
-                    const allFiles = [];
-                    selectedImages.forEach(img => allFiles.push({ type: 'photo', file: img }));
-                    if (selectedVideo) allFiles.push({ type: 'video', file: selectedVideo });
+                    // 图片和视频本来就在同一个列表里，顺序就是用户拖好的顺序
+                    const allFiles = selectedMedia.map(m => ({ type: m.kind, file: m.file }));
 
-                    if (allFiles.length > 10) {
+                    if (allFiles.length > MEDIA_MAX_COUNT) {
                         tg.showAlert('图片 + 视频总数最多 10 个（Telegram 相册上限），请删减后再提交');
                         resetBtn();
                         return;
@@ -1271,21 +1225,26 @@
                         // 同样的文件已经成功上传过（上一次点提交后在后面某一步失败了）就直接复用，不再重复上传
                         const sig = mediaSignature(allFiles);
                         if (!(uploadCache && uploadCache.sig === sig)) {
-                            // 先传到投稿人自己的聊天里：这同时就是他的"预览"；管理员的聊天里不再出现原始上传，
-                            // 即使网络抖动导致重复上传，多出来的也只会在投稿人自己那边，不会再让管理员看到双份图片
-                            let uploadedChat = String(userId);
-                            let r = await uploadMediaTo(uploadedChat, allFiles, setStatus);
-                            if (!r.ok && r.canFallback) {
-                                // 机器人没法主动给这个人发消息（比如他没点过 /start）：退回老办法，传给第一个管理员换 file_id
-                                uploadedChat = ADMIN_ID;
-                                r = await uploadMediaTo(uploadedChat, allFiles, setStatus);
+                            // 依次尝试：素材中转聊天（如果配置了）→ 投稿人自己的聊天 → 第一个管理员的聊天（最后的退路）
+                            const targets = [];
+                            if (MEDIA_STORAGE_CHAT_ID) targets.push(String(MEDIA_STORAGE_CHAT_ID));
+                            targets.push(String(userId));
+                            targets.push(String(ADMIN_ID));
+                            let r = null, chosen = null;
+                            for (const target of Array.from(new Set(targets))) {
+                                r = await uploadMediaTo(target, allFiles, setStatus);
+                                if (r.ok) { chosen = target; break; }
+                                if (!r.canFallback) break;
                             }
-                            if (!r.ok) {
-                                tg.showAlert(r.message);
+                            if (!r || !r.ok) {
+                                tg.showAlert(r ? r.message : '上传失败，请重试');
                                 resetBtn();
                                 return;
                             }
-                            uploadCache = { sig, mediaType: r.mediaType, mediaItems: r.mediaItems, uploadedChat, synced: false };
+                            // albumSent：已经收到这批图片/视频的聊天。上传目标如果是真人聊天，这一份就已经算送达了
+                            const albumSent = new Set();
+                            if (!MEDIA_STORAGE_CHAT_ID || chosen !== String(MEDIA_STORAGE_CHAT_ID)) albumSent.add(chosen);
+                            uploadCache = { sig, mediaType: r.mediaType, mediaItems: r.mediaItems, uploadedChat: chosen, albumSent };
                         }
                         mediaType = uploadCache.mediaType;
                         mediaItems = uploadCache.mediaItems;
@@ -1293,13 +1252,8 @@
                 } else if (selectedType === '求购') {
                     mediaType = 'buy';
                 }
-
-                // 把图片/视频同步给所有管理员（每个管理员只会收到一份；失败重试时不会重复同步）
-                if (uploadCache && mediaItems.length > 0 && !uploadCache.synced) {
-                    setStatus("正在同步图片给所有管理员...");
-                    await broadcastMediaPreviewToOtherAdmins(mediaType, mediaItems, uploadCache.uploadedChat);
-                    uploadCache.synced = true;
-                }
+                // 当前这批媒体"已经收到的聊天"名单（没有媒体时是空的）
+                const albumSent = (uploadCache && mediaItems.length > 0) ? uploadCache.albumSent : new Set();
 
                 // 用户填写的内容统一转义，防止里面的 < > & 破坏消息格式导致发送失败
                 const addressStr = address ? ` ${esc(address)}` : '';
@@ -1358,9 +1312,13 @@
                     ]
                 };
 
-                const adminResults = await Promise.all(ADMIN_IDS.map(adminId =>
-                    tgJson('sendMessage', { chat_id: adminId, text: adminText, parse_mode: 'HTML', reply_markup: keyboardMarkup })
-                ));
+                const adminResults = await Promise.all(ADMIN_IDS.map(async adminId => {
+                    // 先给这位管理员发图片/视频（已经收到过的不重复发），紧接着发审核卡片
+                    if (mediaItems.length > 0 && !albumSent.has(String(adminId))) {
+                        if (await sendAlbumByFileIds(adminId, mediaItems)) albumSent.add(String(adminId));
+                    }
+                    return tgJson('sendMessage', { chat_id: adminId, text: adminText, parse_mode: 'HTML', reply_markup: keyboardMarkup });
+                }));
                 adminResults.forEach((res, i) => {
                     if (!res.ok) console.error(`发送给管理员 ${ADMIN_IDS[i]} 失败:`, res);
                 });
@@ -1376,6 +1334,11 @@
                     return;
                 }
                 cardsDelivered = true;   // 审核卡片已经送达，从这一刻起不会再发第二份
+
+                // 投稿人的图片/视频预览：上传到了他自己的聊天就已经有了；用了素材中转聊天的话，这里用 file_id 发给他一份（只发一次）
+                if (mediaItems.length > 0 && !albumSent.has(String(userId))) {
+                    if (await sendAlbumByFileIds(userId, mediaItems)) albumSent.add(String(userId));
+                }
 
                 // 给投稿人看的"提交成功"预览消息：带上投稿内容，以及「修改内容 / 取消投稿」按钮。
                 // 消息里悄悄藏着图片信息和"每个管理员那边的消息ID"，机器人靠它们在投稿人点按钮时同步管理员那边的审核卡片。
