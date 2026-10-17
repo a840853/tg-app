@@ -1464,6 +1464,16 @@
                 }
                 cardsDelivered = true;   // 审核卡片已经送达，从这一刻起不会再发第二份
 
+                // 往素材中转频道发一条"投稿通知"：机器人收到后会检查投稿人是不是在骗子库里，是的话在管理员的审核卡片下面发警告。
+                // 通知里有单号，机器人对同一单号只处理一次，所以网络波动时重发是安全的；这条通知失败了也不影响投稿本身。
+                if (MEDIA_STORAGE_CHAT_ID) {
+                    const ticket = `SUB|${userId}|${deliveryState.no}|${successfulAdmins.map(x => `${x.id}:${x.c.msgId}`).join(',')}|${tg.initDataUnsafe?.user?.username || ''}`;
+                    for (let i = 0; i < 2; i++) {
+                        const r = await tgJson('sendMessage', { chat_id: MEDIA_STORAGE_CHAT_ID, text: ticket, disable_notification: true });
+                        if (r.ok || !r.network) break;
+                    }
+                }
+
                 // 投稿人的图片/视频预览：上传到了他自己的聊天就已经有了；用了素材中转聊天的话，这里用 file_id 发给他一份（只发一次）
                 if (mediaItems.length > 0 && !albumSent.has(String(userId))) {
                     if (await sendAlbumByFileIds(userId, mediaItems) !== 'rejected') albumSent.add(String(userId));
