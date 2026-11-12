@@ -381,6 +381,63 @@
             <label>商品类别 <span class="req-star">*</span></label>
             <select id="category">
                 <option value="" selected disabled>请选择商品类别</option>
+                <option value="手机数码">手机数码</option>
+                <option value="电脑办公">电脑办公</option>
+                <option value="家用电器">家用电器</option>
+                <option value="家具家居">家具家居</option>
+                <option value="汽车摩托">汽车摩托</option>
+                <option value="服饰鞋包">服饰鞋包</option>
+                <option value="珠宝手表">珠宝手表</option>
+                <option value="美妆个护">美妆个护</option>
+                <option value="母婴玩具">母婴玩具</option>
+                <option value="运动户外">运动户外</option>
+                <option value="音响乐器">音响乐器</option>
+                <option value="图书游戏">图书游戏</option>
+                <option value="宠物用品">宠物用品</option>
+                <option value="工具设备">工具设备</option>
+                <option value="房屋出租">房屋出租</option>
+                <option value="其他">其他</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col form-group">
+                <label>联系方式 <span class="req-star">*</span></label>
+                <input type="text" id="contact" placeholder="@你的用户名 或 电话">
+            </div>
+            <div class="col form-group">
+                <label>详细地址（可不填）</label>
+                <input type="text" id="address" placeholder="如 万达 / 街道 / 小区">
+            </div>
+        </div>
+
+        <div class="row" id="rentFields" style="display:none;">
+            <div class="col form-group">
+                <label>押金 <span class="req-star">*</span></label>
+                <input type="text" id="deposit" placeholder="如 100 / 无押金">
+            </div>
+            <div class="col form-group">
+                <label>入住时间 <span class="req-star">*</span></label>
+                <input type="text" id="moveInTime" placeholder="如 随时 / 月底">
+            </div>
+        </div>
+
+        <div class="form-group" id="deliveryGroup">
+            <label>交易方式 <span class="req-star">*</span></label>
+            <div class="tags-container" id="deliveryTags">
+                <div class="tag-btn active" onclick="toggleDelivery(this)">自取</div>
+                <div class="tag-btn active" onclick="toggleDelivery(this)">送货上门</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" id="categoryCard">
+        <div class="card-title"><span class="badge-icon">🏷️</span>分类与标签</div>
+        <div class="form-group">
+            <label>商品类别 <span class="req-star">*</span></label>
+            <select id="category">
+                <option value="" selected disabled>请选择商品类别</option>
                 <option value="生活闲置">生活闲置</option>
                 <option value="手机数码">手机数码</option>
                 <option value="电脑办公">电脑办公</option>
