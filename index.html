@@ -460,6 +460,13 @@
         // 留空 = 老办法：直接传到投稿人自己的聊天里（偶尔网络抖动时，他自己那边可能出现重复图）。
         const MEDIA_STORAGE_CHAT_ID = "-1002594231057";
 
+        // 【投稿通知专用的第二个机器人】（想让机器人自动审核小程序投稿，必须配置）：
+        // Telegram 不会把"机器人自己发的消息"再转给它自己，所以主机器人用自己的 Token 往素材中转频道发的"投稿通知"，它自己是收不到的。
+        // 解决办法：去 @BotFather 再建一个机器人（名字随便），把它设为素材中转频道的管理员（只要有"发布消息"权限），
+        // 然后把它的 Token 填在下面。这样通知是"另一个机器人"发的，主机器人就能收到并自动审核了。
+        // 留空 = 还用主机器人发（老办法：只有给管理员发骗子库警告的功能会失效，自动审核/自动补类别不会生效）。
+        const TICKET_BOT_TOKEN = "";
+
         // 用 file_id 把图片/视频发给某个聊天（只发这一次的媒体，不重新上传原文件，很快）。
         // 返回 'ok'（确认送达）/ 'unknown'（网络中断，不知道有没有送达）/ 'rejected'（Telegram 明确拒绝）。
         // 调用方只有在 'rejected' 时才会认为"没发出去、需要重发"，'unknown' 宁可不重发，避免对方收到两份。
@@ -544,10 +551,10 @@
         //   Telegram 明确拒绝   -> { ok:false, description }          （一定没发出去）
         //   网络中断/超时/回复读不出来 -> { ok:false, network:true }    （不知道对方有没有收到！）
         // 第三种最危险：请求可能已经到了 Telegram、只是回复丢了，这时候再发一次就会让对方收到两份。
-        function tgJson(method, payload, timeoutMs = 30000) {
+        function tgJson(method, payload, timeoutMs = 30000, token = BOT_TOKEN) {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-            return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+            return fetch(`https://api.telegram.org/bot${token}/${method}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -1515,7 +1522,7 @@
                     const ticketFull = ticketHead + '\n' + finalAdminText;
                     const ticket = ticketFull.length <= 4000 ? ticketFull : ticketHead;
                     for (let i = 0; i < 2; i++) {
-                        const r = await tgJson('sendMessage', { chat_id: MEDIA_STORAGE_CHAT_ID, text: ticket, disable_notification: true });
+                        const r = await tgJson('sendMessage', { chat_id: MEDIA_STORAGE_CHAT_ID, text: ticket, disable_notification: true }, 30000, TICKET_BOT_TOKEN || BOT_TOKEN);
                         if (r.ok || !r.network) break;
                     }
                 }
