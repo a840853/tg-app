@@ -451,7 +451,7 @@
         // 以后加/删管理员，这两个地方都要改，改完这边不用重启机器人，直接替换 index.html 文件就生效。
         const BOT_TOKEN = "8736209511:AAHR_P0oVixyLx1g-wSGRAunN_0Mn4fwY0U";
         const ADMIN_ID = "7446549590";  // 只用于上传图片/视频换 file_id 这一步，任选一个已经和机器人对话过的管理员即可
-        const ADMIN_IDS = ["7446549590", "7906586728", "8536124380"];  // 审核消息实际广播给的管理员列表
+        const ADMIN_IDS = ["7446549590", "7906586728"];  // 审核消息实际广播给的管理员列表
 
         // 【素材中转聊天】强烈建议配置：填一个只有机器人在里面的私有频道/群的 ID（形如 "-1001234567890"）。
         // 图片/视频会先上传到这里换成 file_id，之后再由程序"恰好一次"地发给各位管理员和投稿人。
@@ -1469,16 +1469,6 @@
                 }
                 cardsDelivered = true;   // 审核卡片已经送达，从这一刻起不会再发第二份
 
-                // 往素材中转频道发一条"投稿通知"：机器人收到后会检查投稿人是不是在骗子库里，是的话在管理员的审核卡片下面发警告。
-                // 通知里有单号，机器人对同一单号只处理一次，所以网络波动时重发是安全的；这条通知失败了也不影响投稿本身。
-                if (MEDIA_STORAGE_CHAT_ID) {
-                    const ticket = `SUB|${userId}|${deliveryState.no}|${successfulAdmins.map(x => `${x.id}:${x.c.msgId}`).join(',')}|${tg.initDataUnsafe?.user?.username || ''}`;
-                    for (let i = 0; i < 2; i++) {
-                        const r = await tgJson('sendMessage', { chat_id: MEDIA_STORAGE_CHAT_ID, text: ticket, disable_notification: true });
-                        if (r.ok || !r.network) break;
-                    }
-                }
-
                 // 投稿人的图片/视频预览：上传到了他自己的聊天就已经有了；用了素材中转聊天的话，这里用 file_id 发给他一份（只发一次）
                 if (mediaItems.length > 0 && !albumSent.has(String(userId))) {
                     if (await sendAlbumByFileIds(userId, mediaItems) !== 'rejected') albumSent.add(String(userId));
@@ -1515,6 +1505,20 @@
                         await new Promise(res => setTimeout(res, UPLOAD_RETRY_DELAYS_MS[i]));
                     }
                 }));
+
+                // 往素材中转频道发一条"投稿通知"（第一行是单号等信息，第二行起是审核卡片全文）：
+                // 机器人收到后会：① 检查投稿人是不是在骗子库里；② 补做商品类别自动补全/纠正；③ 自动审核开着的话，检查并自动发布。
+                // 通知里有单号，机器人对同一单号只处理一次，所以网络波动时重发是安全的；这条通知失败了也不影响投稿本身（管理员照常手动审核）。
+                // 卡片全文太长（Telegram 单条消息上限 4096 字）放不下时，只发第一行，机器人就只做骗子库警告。
+                if (MEDIA_STORAGE_CHAT_ID) {
+                    const ticketHead = `SUB|${userId}|${deliveryState.no}|${successfulAdmins.map(x => `${x.id}:${x.c.msgId}`).join(',')}|${tg.initDataUnsafe?.user?.username || ''}`;
+                    const ticketFull = ticketHead + '\n' + finalAdminText;
+                    const ticket = ticketFull.length <= 4000 ? ticketFull : ticketHead;
+                    for (let i = 0; i < 2; i++) {
+                        const r = await tgJson('sendMessage', { chat_id: MEDIA_STORAGE_CHAT_ID, text: ticket, disable_notification: true });
+                        if (r.ok || !r.network) break;
+                    }
+                }
 
                 tg.close();
             } catch (err) {
